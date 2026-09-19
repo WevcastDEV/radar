@@ -1,0 +1,37 @@
+{
+  "name": "@radar/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.wctech.radar",
+    "productName": "Radar de Oportunidades",
+    "directories": {
+      "output": "../../release"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "publish": [{"provider":"github","owner":"WevcastDEV","repo":"radar","releaseType":"release"}]
+  },
+  "devDependencies": {
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
+    "electron-updater": "^6.8.9"
+  }
+}

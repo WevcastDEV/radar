@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radar de Oportunidades 2.0 | A Suíte Definitiva de Prospecção B2B</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    
+    <!-- Icons & Frameworks -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    },
+                    colors: {
+                        navy: {
+                            950: '#060B13',
+                            900: '#0A1220',
+                            850: '#0F1A2E',
+                            800: '#15243F',
+                            700: '#1E3A5F',
+                            600: '#2C5282',
+                            500: '#3B82F6',
+                            400: '#60A5FA',
+                        },
+                        charcoal: {
+                            950: '#090D14',
+                            900: '#101622',
+                            800: '#1A2332',
+                            700: '#263447',
+                            600: '#3E4F66',
+                        },
+                        accent: {
+                            emerald: '#10B981',
+                            greenWhatsapp: '#25D366',
+                            cyan: '#06B6D4',
+                            amber: '#F59E0B',
+                        }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'float': 'float 6s ease-in-out infinite',
+                        'glow': 'glow 3s ease-in-out infinite alternate',
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        },
+                        glow: {
+                            '0%': { opacity: '0.4', filter: 'blur(30px)' },
+                            '100%': { opacity: '0.8', filter: 'blur(50px)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #060B13; }
+        ::-webkit-scrollbar-thumb { background: #1E3A5F; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #2C5282; }
+
+        /* Glassmorphism & High-end effects */
+        .glass-panel {
+            background: rgba(16, 22, 34, 0.72);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-panel-hover:hover {
+            border-color: rgba(96, 165, 250, 0.3);
+            box-shadow: 0 12px 36px -8px rgba(6, 11, 19, 0.8), 0 0 24px 0 rgba(59, 130, 246, 0.15);
+        }
+        .glass-nav {
+            background: rgba(9, 13, 20, 0.85);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .gradient-text-blue {
+            background: linear-gradient(135deg, #E2E8F0 0%, #93C5FD 50%, #3B82F6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .gradient-border {
+            position: relative;
+            background: linear-gradient(180deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.02) 100%);
+            padding: 1px;
+            border-radius: 1rem;
+        }
+        .radar-grid {
+            background-image: radial-gradient(rgba(59, 130, 246, 0.12) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+        /* Pulse dot for map */
+        .beacon {
+            position: relative;
+        }
+        .beacon::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            background: inherit;
+            border-radius: inherit;
+            animation: ripple 2s infinite ease-out;
+        }
+        @keyframes ripple {
+            0% { transform: scale(1); opacity: 0.8; }
+            100% { transform: scale(3.5); opacity: 0; }
+        }
+    </style>
+</head>
+<body class="bg-navy-950 text-slate-100 font-sans selection:bg-navy-600 selection:text-white antialiased overflow-x-hidden">
+
+    <!-- Ambient Glow Top -->
+    <div class="fixed top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[450px] bg-gradient-to-b from-navy-700/25 via-blue-600/10 to-transparent blur-[120px] pointer-events-none -z-10 animate-glow"></div>
+    <div class="fixed top-[600px] right-0 w-[500px] h-[500px] bg-emerald-500/5 blur-[150px] pointer-events-none -z-10"></div>
+
+    <!-- Announcement Header Bar -->
+    <div class="w-full bg-gradient-to-r from-navy-900 via-navy-800 to-navy-900 border-b border-navy-700/50 py-2.5 px-4 text-center text-xs text-slate-300 font-medium relative z-50">
+        <div class="max-w-7xl mx-auto flex items-center justify-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[10px] font-bold uppercase tracking-wider">
+                NOVO • Versão 2.0 Enterprise
+            </span>
+            <span>Motor de I.A. Comercial + Mapeamento de Oportunidades Georreferenciadas.</span>
+            <a href="#demonstracao" class="text-blue-400 font-bold hover:underline inline-flex items-center gap-1 ml-1">
+                Conferir demonstração <i class="fas fa-arrow-right text-[10px]"></i>
+            </a>
+        </div>
+    </div>
+
+    <!-- Navigation Bar -->
+    <nav class="sticky top-0 z-40 glass-nav transition-all duration-300">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-20">
+                <!-- Brand -->
+                <div class="flex items-center gap-3.5">
+                    <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-charcoal-800 to-navy-900 border border-slate-700/80 flex items-center justify-center shadow-xl shadow-black/60 relative group">
+                        <div class="absolute inset-0 rounded-2xl bg-blue-500/20 blur opacity-0 group-hover:opacity-100 transition duration-300"></div>
+                        <span class="font-extrabold text-white text-base tracking-wider">RO</span>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="font-bold text-lg text-white tracking-tight">Radar de Oportunidades</span>
+                            <span class="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">PRO</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 font-mono">Powered by WCTECH</p>
+                    </div>
+                </div>
+
+                <!-- Desktop Links -->
+                <div class="hidden lg:flex items-center space-x-8 text-sm font-medium text-slate-300">
+                    <a href="#como-funciona" class="hover:text-white transition-colors">Como Funciona</a>
+                    <a href="#funcionalidades" class="hover:text-white transition-colors">Recursos Enterprise</a>
+                    <a href="#comparativo" class="hover:text-white transition-colors">Antes vs Depois</a>
+                    <a href="#simulador" class="hover:text-white transition-colors flex items-center gap-1.5 text-blue-400">
+                        <i class="fas fa-calculator text-xs"></i> Simulador ROI
+                    </a>
+                    <a href="#precos" class="hover:text-white transition-colors">Planos & Preços</a>
+                    <a href="#faq" class="hover:text-white transition-colors">FAQ</a>
+                </div>
+
+                <!-- Action Button -->
+                <div class="flex items-center gap-3">
+                    <a href="https://wa.me/5592992920233?text=Ol%C3%A1%2C%20gostaria%20de%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20Radar%20de%20Oportunidades%20PRO" 
+                       target="_blank" 
+                       class="relative inline-flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-navy-700 via-navy-600 to-blue-600 hover:from-navy-600 hover:to-blue-500 shadow-lg shadow-blue-900/30 border border-blue-400/30 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]">
+                        <i class="fab fa-whatsapp text-emerald-400 text-base"></i>
+                        <span>Falar com Especialista</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- HERO SECTION -->
+    <header class="relative pt-12 pb-20 md:pt-20 md:pb-32 overflow-hidden radar-grid">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
+            
+            <!-- Pill Tag -->
+            <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-panel border border-slate-700/60 mb-8 shadow-inner">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                <span class="text-xs font-semibold text-slate-300">Aceleração de Prospecção Ativa B2B</span>
+                <span class="text-slate-600">|</span>
+                <span class="text-xs text-blue-400 font-mono">v2.4 Enterprise</span>
+            </div>
+
+            <!-- Main Title -->
+            <h1 class="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-white mb-6 leading-[1.12]">
+                O Fim da Prospecção Fria no Escuro.<br class="hidden sm:inline"/>
+                <span class="gradient-text-blue">Mapeie, Aborde e Feche Contratos.</span>
+            </h1>
+
+            <!-- Subtitle -->
+            <p class="max-w-3xl mx-auto text-base sm:text-xl text-slate-300 mb-10 leading-relaxed font-normal">
+                O <strong class="text-white font-semibold">Radar de Oportunidades</strong> unifica 
+                <span class="text-blue-400">Inteligência Geográfica</span>, 
+                <span class="text-emerald-400">Robô Cadenciado de WhatsApp</span> e 
+                <span class="text-purple-400">I.A. Comercial</span> para que sua equipe nunca mais dependa de listas frias ou indicações aleatórias.
+            </p>
+
+            <!-- CTA Group -->
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+                <a href="https://wa.me/5592992920233?text=Quero%20uma%20demonstra%C3%A7%C3%A3o%20exclusiva%20do%20Radar%20de%20Oportunidades" 
+                   target="_blank"
+                   class="w-full sm:w-auto px-8 py-4 rounded-xl text-base font-bold text-white bg-gradient-to-r from-blue-600 to-navy-600 hover:from-blue-500 hover:to-navy-500 border border-blue-400/40 shadow-xl shadow-blue-600/25 transition-all duration-300 flex items-center justify-center gap-3 group">
+                    <span>Quero Multiplicar Minhas Vendas</span>
+                    <i class="fas fa-arrow-right text-xs group-hover:translate-x-1 transition-transform"></i>
+                </a>
+
+                <a href="#simulador" 
+                   class="w-full sm:w-auto px-7 py-4 rounded-xl text-base font-semibold text-slate-200 glass-panel hover:bg-slate-800/80 transition-all flex items-center justify-center gap-2 border border-slate-700">
+                    <i class="fas fa-calculator text-blue-400 text-sm"></i>
+                    <span>Simular Lucro Potencial</span>
+                </a>
+            </div>
+
+            <!-- Authority Metrics Bar -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto pt-6 pb-2 border-t border-slate-800/80 text-left">
+                <div class="p-3">
+                    <p class="text-2xl sm:text-3xl font-extrabold text-white font-mono">+14.500</p>
+                    <p class="text-xs text-slate-400 mt-0.5">Empresas Mapeadas por Região</p>
+                </div>
+                <div class="p-3">
+                    <p class="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono">3.8x</p>
+                    <p class="text-xs text-slate-400 mt-0.5">Mais Reuniões Agendadas</p>
+                </div>
+                <div class="p-3">
+                    <p class="text-2xl sm:text-3xl font-extrabold text-blue-400 font-mono">25h/sem</p>
+                    <p class="text-xs text-slate-400 mt-0.5">Poupadas por Vendedor</p>
+                </div>
+                <div class="p-3">
+                    <p class="text-2xl sm:text-3xl font-extrabold text-purple-400 font-mono">100%</p>
+                    <p class="text-xs text-slate-400 mt-0.5">LGPD & Segurança Empresarial</p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- LIVE INTERACTIVE SOFTWARE SHOWCASE -->
+        <div id="demonstracao" class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 mt-12 relative z-20">
+            <div class="gradient-border shadow-2xl shadow-blue-950/60">
+                <div class="rounded-2xl bg-charcoal-950 p-2 sm:p-4 border border-slate-800/90 overflow-hidden">
+                    
+                    <!-- Showcase Window Bar -->
+                    <div class="flex items-center justify-between px-3 py-2 border-b border-slate-800/80 mb-4">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 rounded-full bg-red-500/80 inline-block"></span>
+                            <span class="w-3 h-3 rounded-full bg-yellow-500/80 inline-block"></span>
+                            <span class="w-3 h-3 rounded-full bg-green-500/80 inline-block"></span>
+                            <span class="text-xs text-slate-500 font-mono ml-2">app.radardeoportunidades.com.br</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                                <i class="fas fa-circle text-emerald-400 text-[8px] mr-1"></i> Sistema Operacional Online
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Interactive Showcase Tabs -->
+                    <div class="flex items-center gap-2 overflow-x-auto pb-2 mb-4 scrollbar-hide text-xs font-semibold">
+                        <button onclick="switchTab('mapa')" id="tab-mapa" class="tab-btn px-4 py-2 rounded-lg bg-navy-700 text-white border border-blue-500/50 flex items-center gap-2 transition shrink-0">
+                            <i class="fas fa-map-marked-alt text-blue-400"></i> 1. Mapa Inteligente de Leads
+                        </button>
+                        <button onclick="switchTab('robo')" id="tab-robo" class="tab-btn px-4 py-2 rounded-lg bg-charcoal-900 text-slate-400 border border-slate-800 hover:text-white flex items-center gap-2 transition shrink-0">
+                            <i class="fab fa-whatsapp text-emerald-400"></i> 2. Robô de Disparo Cadenciado
+                        </button>
+                        <button onclick="switchTab('ia')" id="tab-ia" class="tab-btn px-4 py-2 rounded-lg bg-charcoal-900 text-slate-400 border border-slate-800 hover:text-white flex items-center gap-2 transition shrink-0">
+                            <i class="fas fa-brain text-purple-400"></i> 3. Assistente de I.A. Copilot
+                        </button>
+                        <button onclick="switchTab('kanban')" id="tab-kanban" class="tab-btn px-4 py-2 rounded-lg bg-charcoal-900 text-slate-400 border border-slate-800 hover:text-white flex items-center gap-2 transition shrink-0">
+                            <i class="fas fa-columns text-amber-400"></i> 4. Funil de Fechamento (Kanban)
+                        </button>
+                    </div>
+
+                    <!-- TAB CONTENTS -->
+                    <!-- TAB 1: MAPA -->
+                    <div id="content-mapa" class="tab-content block">
+                        <div class="relative w-full h-[400px] sm:h-[480px] rounded-xl bg-charcoal-900 border border-slate-800 overflow-hidden flex flex-col md:flex-row">
+                            <!-- Simulated Map Canvas -->
+                            <div class="flex-1 relative bg-navy-950 p-6 flex flex-col justify-between overflow-hidden">
+                                <!-- Grid Lines & Map Sim -->
+                                <div class="absolute inset-0 bg-[radial-gradient(#1E3A5F_1px,transparent_1px)] [background-size:24px_24px] opacity-40"></div>
+                                
+                                <!-- Floating Pins -->
+                                <div class="absolute top-1/4 left-1/3 p-2 rounded-xl glass-panel border border-blue-500/40 flex items-center gap-2 shadow-2xl animate-float">
+                                    <div class="w-3 h-3 rounded-full bg-emerald-500 beacon"></div>
+                                    <div class="text-left">
+                                        <p class="text-[11px] font-bold text-white leading-none">Condomínio Solar das Palmeiras</p>
+                                        <p class="text-[9px] text-emerald-400 font-mono mt-0.5">Score: 94 pts • Alto Potencial</p>
+                                    </div>
+                                </div>
+
+                                <div class="absolute bottom-1/3 right-1/4 p-2 rounded-xl glass-panel border border-yellow-500/40 flex items-center gap-2 shadow-2xl">
+                                    <div class="w-3 h-3 rounded-full bg-yellow-500 beacon"></div>
+                                    <div class="text-left">
+                                        <p class="text-[11px] font-bold text-white leading-none">Centro Logístico Industrial</p>
+                                        <p class="text-[9px] text-yellow-400 font-mono mt-0.5">Score: 82 pts • Pronto p/ Contato</p>
+                                    </div>
+                                </div>
+
+                                <div class="absolute top-1/2 left-2/3 p-2 rounded-xl glass-panel border border-blue-500/40 flex items-center gap-2 shadow-2xl">
+                                    <div class="w-3 h-3 rounded-full bg-blue-500 beacon"></div>
+                                    <div class="text-left">
+                                        <p class="text-[11px] font-bold text-white leading-none">Rede Comercial Norte</p>
+                                        <p class="text-[9px] text-blue-400 font-mono mt-0.5">Score: 78 pts • WhatsApp Ativo</p>
+                                    </div>
+                                </div>
+
+                                <!-- Top Map Controls -->
+                                <div class="relative z-10 flex justify-between items-center">
+                                    <div class="flex gap-2">
+                                        <span class="px-2.5 py-1 rounded-md bg-navy-800/90 text-white text-xs border border-slate-700 flex items-center gap-1.5">
+                                            <i class="fas fa-location-dot text-red-400"></i> Raio: 15 km
+                                        </span>
+                                        <span class="px-2.5 py-1 rounded-md bg-navy-800/90 text-white text-xs border border-slate-700">
+                                            Filtro: Empresas & Condomínios
+                                        </span>
+                                    </div>
+                                    <span class="px-3 py-1 rounded-md bg-emerald-500/20 text-emerald-300 text-xs font-mono font-bold border border-emerald-500/30">
+                                        ● 142 Leads Detectados
+                                    </span>
+                                </div>
+
+                                <!-- Bottom Map Legend -->
+                                <div class="relative z-10 p-3 rounded-lg glass-panel max-w-sm">
+                                    <p class="text-xs font-bold text-white mb-1">Roteirização Inteligente</p>
+                                    <p class="text-[10px] text-slate-400 leading-tight">Agrupe reuniões na mesma zona geográfica para que o seu vendedor faça 4 visitas presenciais no mesmo dia sem cruzar a cidade.</p>
+                                </div>
+                            </div>
+
+                            <!-- Map Sidebar Details -->
+                            <div class="w-full md:w-80 bg-charcoal-900 border-t md:border-t-0 md:border-l border-slate-800 p-4 flex flex-col justify-between">
+                                <div>
+                                    <div class="flex items-center justify-between mb-3">
+                                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Lead Selecionado</span>
+                                        <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">QUALIFICADO</span>
+                                    </div>
+                                    <h4 class="text-sm font-bold text-white">Condomínio Solar das Palmeiras</h4>
+                                    <p class="text-xs text-slate-400 mt-1">Av. Coronel Teixeira, 4200 - Ponta Negra</p>
+                                    
+                                    <div class="mt-4 space-y-2 text-xs">
+                                        <div class="flex justify-between p-2 rounded bg-slate-800/60 border border-slate-700/50">
+                                            <span class="text-slate-400">Síndico / Decisor:</span>
+                                            <span class="text-white font-semibold">Dr. Marcelo Ramos</span>
+                                        </div>
+                                        <div class="flex justify-between p-2 rounded bg-slate-800/60 border border-slate-700/50">
+                                            <span class="text-slate-400">WhatsApp Comercial:</span>
+                                            <span class="text-emerald-400 font-mono font-semibold">(92) 99341-XXXX</span>
+                                        </div>
+                                        <div class="flex justify-between p-2 rounded bg-slate-800/60 border border-slate-700/50">
+                                            <span class="text-slate-400">Score de Afinidade:</span>
+                                            <span class="text-blue-400 font-bold">94 / 100</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button class="w-full mt-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center justify-center gap-2">
+                                    <i class="fab fa-whatsapp"></i> Iniciar Contato Direto
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: ROBO WHATSAPP -->
+                    <div id="content-robo" class="tab-content hidden">
+                        <div class="w-full h-[400px] sm:h-[480px] rounded-xl bg-charcoal-900 border border-slate-800 p-6 flex flex-col md:flex-row gap-6">
+                            <!-- Campaign Setup -->
+                            <div class="w-full md:w-1/2 flex flex-col justify-between">
+                                <div>
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <i class="fab fa-whatsapp text-emerald-400 text-lg"></i>
+                                        <h4 class="text-sm font-bold text-white">Disparo Cadenciado Anti-Bloqueio</h4>
+                                    </div>
+                                    <p class="text-xs text-slate-400 mb-4">Envio humanizado com intervalo dinâmico de 45 a 120 segundos, variáveis customizadas por nome do decisor e segmento.</p>
+
+                                    <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300 mb-4 space-y-2">
+                                        <p class="text-slate-500">// Mensagem Personalizada Automática:</p>
+                                        <p>"Olá <span class="text-emerald-400">{{primeiro_nome}}</span>, vi que você administra o <span class="text-blue-400">{{nome_empresa}}</span> aqui na região. Temos um relatório de segurança comparativo para o seu setor. Posso te enviar um resumo de 2 minutos?"</p>
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-3 text-xs">
+                                        <div class="p-2.5 rounded-lg bg-slate-800/50 border border-slate-700">
+                                            <p class="text-slate-400">Taxa de Abertura</p>
+                                            <p class="text-lg font-bold text-emerald-400 font-mono">96.8%</p>
+                                        </div>
+                                        <div class="p-2.5 rounded-lg bg-slate-800/50 border border-slate-700">
+                                            <p class="text-slate-400">Taxa de Resposta</p>
+                                            <p class="text-lg font-bold text-blue-400 font-mono">24.2%</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="pt-2">
+                                    <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
+                                        <i class="fas fa-shield-alt text-emerald-400"></i> Proteção de chip com aquecimento inteligente e fallback
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Live Chat Preview -->
+                            <div class="w-full md:w-1/2 bg-slate-950 rounded-xl border border-slate-800 p-4 flex flex-col justify-between">
+                                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-white">MR</div>
+                                        <div>
+                                            <p class="text-xs font-bold text-white">Marcelo Ramos (Síndico)</p>
+                                            <p class="text-[10px] text-emerald-400">Online agora • Respondeu em 4m</p>
+                                        </div>
+                                    </div>
+                                    <span class="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold">REUNIÃO AGENDADA</span>
+                                </div>
+
+                                <div class="space-y-3 my-4 overflow-y-auto pr-1">
+                                    <div class="max-w-[85%] bg-navy-800 p-2.5 rounded-lg rounded-tl-none text-xs text-slate-200">
+                                        Olá Marcelo, tudo bem? Notei que você é o gestor do Condomínio Solar das Palmeiras. Posso te apresentar nosso plano de monitoramento preditivo?
+                                        <span class="block text-[9px] text-slate-400 text-right mt-1">10:14 ✓✓</span>
+                                    </div>
+                                    <div class="max-w-[85%] ml-auto bg-slate-800 p-2.5 rounded-lg rounded-tr-none text-xs text-white">
+                                        Bom dia! Estávamos justamente orçando isso essa semana. Você consegue vir aqui na quinta às 15h?
+                                        <span class="block text-[9px] text-slate-400 text-right mt-1">10:18</span>
+                                    </div>
+                                </div>
+
+                                <div class="p-2 rounded bg-slate-900 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                                    <span><i class="fas fa-calendar-check text-blue-400 mr-1"></i> Card movido para "Visita Agendada"</span>
+                                    <span class="text-blue-400 font-bold">Automático</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 3: IA COPILOT -->
+                    <div id="content-ia" class="tab-content hidden">
+                        <div class="w-full h-[400px] sm:h-[480px] rounded-xl bg-charcoal-900 border border-slate-800 p-6 flex flex-col justify-between">
+                            <div class="max-w-2xl">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <i class="fas fa-brain text-purple-400 text-lg"></i>
+                                    <h4 class="text-sm font-bold text-white">I.A. Generativa de Argumentação & Fechamento</h4>
+                                </div>
+                                <p class="text-xs text-slate-400 mb-6">A I.A. analisa o perfil tributário, porte e localização do cliente para fornecer a melhor proposta comercial sob medida.</p>
+
+                                <div class="space-y-3">
+                                    <div class="p-3 rounded-lg bg-slate-950 border border-purple-500/30 text-xs">
+                                        <p class="text-purple-400 font-bold mb-1"><i class="fas fa-sparkles"></i> Sugestão de Pitch Personalizado:</p>
+                                        <p class="text-slate-300">"Condomínios de alto padrão nessa área valorizam muito a redução da taxa de condomínio através de portaria remota com contingência redundante de internet. Destaque nosso SLA de 15 minutos."</p>
+                                    </div>
+
+                                    <div class="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs">
+                                        <p class="text-blue-400 font-bold mb-1"><i class="fas fa-calculator"></i> Estimativa de Ticket Médio:</p>
+                                        <p class="text-slate-300">Faixa estimada de contrato: <strong class="text-white font-mono">R$ 3.800/mês a R$ 6.200/mês</strong>. Risco de inadimplência: Muito Baixo.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center justify-between p-3 rounded-lg bg-purple-950/40 border border-purple-800/50">
+                                <span class="text-xs text-purple-200">Copilot disponível em todas as telas com atalho rápido.</span>
+                                <span class="text-xs text-purple-300 font-mono font-bold">Motor Gemini 1.5 + Base Local</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TAB 4: KANBAN -->
+                    <div id="content-kanban" class="tab-content hidden">
+                        <div class="w-full h-[400px] sm:h-[480px] rounded-xl bg-charcoal-900 border border-slate-800 p-4 overflow-x-auto">
+                            <div class="grid grid-cols-4 gap-3 min-w-[700px] h-full">
+                                <!-- Col 1 -->
+                                <div class="bg-slate-950 rounded-xl p-3 border border-slate-800 flex flex-col">
+                                    <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+                                        <span class="text-xs font-bold text-slate-300">1. Oportunidades (18)</span>
+                                        <span class="text-[10px] text-slate-500 font-mono">R$ 42k</span>
+                                    </div>
+                                    <div class="space-y-2 flex-1">
+                                        <div class="p-2.5 rounded bg-slate-900 border border-slate-700/60 text-xs">
+                                            <p class="font-bold text-white">Supermercado Silva</p>
+                                            <p class="text-[10px] text-slate-400">Score 78 • Disparado WhatsApp</p>
+                                        </div>
+                                        <div class="p-2.5 rounded bg-slate-900 border border-slate-700/60 text-xs">
+                                            <p class="font-bold text-white">Hospital São Lucas</p>
+                                            <p class="text-[10px] text-slate-400">Score 89 • Aguardando</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Col 2 -->
+                                <div class="bg-slate-950 rounded-xl p-3 border border-slate-800 flex flex-col">
+                                    <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+                                        <span class="text-xs font-bold text-blue-400">2. Em Conversa (7)</span>
+                                        <span class="text-[10px] text-slate-500 font-mono">R$ 28k</span>
+                                    </div>
+                                    <div class="space-y-2 flex-1">
+                                        <div class="p-2.5 rounded bg-slate-900 border border-blue-500/40 text-xs">
+                                            <p class="font-bold text-white">Clínica OdontoPrime</p>
+                                            <p class="text-[10px] text-blue-400">Pediu proposta em PDF</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Col 3 -->
+                                <div class="bg-slate-950 rounded-xl p-3 border border-slate-800 flex flex-col">
+                                    <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+                                        <span class="text-xs font-bold text-yellow-400">3. Visita / Proposta (4)</span>
+                                        <span class="text-[10px] text-slate-500 font-mono">R$ 31k</span>
+                                    </div>
+                                    <div class="space-y-2 flex-1">
+                                        <div class="p-2.5 rounded bg-slate-900 border border-yellow-500/40 text-xs">
+                                            <p class="font-bold text-white">Solar das Palmeiras</p>
+                                            <p class="text-[10px] text-yellow-400">Quinta-feira às 15h</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Col 4 -->
+                                <div class="bg-slate-950 rounded-xl p-3 border border-slate-800 flex flex-col">
+                                    <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+                                        <span class="text-xs font-bold text-emerald-400">4. Fechamento (9)</span>
+                                        <span class="text-[10px] text-slate-500 font-mono">R$ 64k</span>
+                                    </div>
+                                    <div class="space-y-2 flex-1">
+                                        <div class="p-2.5 rounded bg-slate-900 border border-emerald-500/40 text-xs">
+                                            <p class="font-bold text-white">Galpão Norte Log</p>
+                                            <p class="text-[10px] text-emerald-400 font-bold">Contrato Assinado ✓</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- BEFORE VS AFTER (O CONTRASTE QUE VENDE) -->
+    <section id="comparativo" class="py-20 bg-charcoal-950 border-t border-b border-slate-800/80">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <span class="text-xs font-bold text-red-400 tracking-wider uppercase bg-red-950/40 border border-red-800/50 px-3 py-1 rounded-full">
+                    A Dura Realidade
+                </span>
+                <h2 class="text-3xl sm:text-5xl font-extrabold text-white mt-4">
+                    Por que métodos tradicionais de vendas estão falindo empresas?
+                </h2>
+                <p class="text-slate-400 mt-4 text-base">
+                    Comprar listas frias e colocar vendedores para fazer ligações manuais é queimar dinheiro e energia.
+                </p>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+                <!-- Tradicional -->
+                <div class="glass-panel p-8 rounded-2xl border-red-500/20 relative">
+                    <div class="flex items-center gap-3 mb-6">
+                        <div class="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center text-red-400">
+                            <i class="fas fa-times text-xl"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-red-200">Prospecção Arcaica (Sem o Radar)</h3>
+                    </div>
+
+                    <ul class="space-y-4 text-sm text-slate-300">
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-xmark text-red-400 mt-1"></i>
+                            <span>Planilhas desatualizadas do Excel com telefones que não existem.</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-xmark text-red-400 mt-1"></i>
+                            <span>Vendedor passa 6 horas procurando contatos e apenas 1 hora negociando.</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-xmark text-red-400 mt-1"></i>
+                            <span>Rotas cegas: visitas marcadas em bairros opostos gerando gasto de combustível e atrasos.</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-xmark text-red-400 mt-1"></i>
+                            <span>Chips de WhatsApp bloqueados constantemente por disparos amadores.</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-xmark text-red-400 mt-1"></i>
+                            <span>Falta de previsibilidade: você nunca sabe quanto vai faturar no próximo mês.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Com o Radar -->
+                <div class="glass-panel p-8 rounded-2xl border-emerald-500/30 relative bg-gradient-to-b from-charcoal-900 to-navy-950">
+                    <div class="flex items-center gap-3 mb-6">
+                        <div class="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                            <i class="fas fa-check text-xl"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-emerald-300">Com o Radar de Oportunidades PRO</h3>
+                    </div>
+
+                    <ul class="space-y-4 text-sm text-slate-200">
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-check text-emerald-400 mt-1"></i>
+                            <span>Mapeamento em tempo real de empresas e condomínios com endereço e CNPJ válidos.</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-check text-emerald-400 mt-1"></i>
+                            <span>Disparos inteligentes no WhatsApp com cadência anti-bloqueio e texto personalizado.</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-check text-emerald-400 mt-1"></i>
+                            <span>Visualização geográfica por raios e zonas, otimizando o dia dos consultores de campo.</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-check text-emerald-400 mt-1"></i>
+                            <span>I.A. Copilot que sugere a melhor estratégia de venda para cada nicho.</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <i class="fas fa-check text-emerald-400 mt-1"></i>
+                            <span>Funil Kanban com métricas precisas para você saber exatamente o ROI da sua equipe.</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CORE FEATURES GRID -->
+    <section id="funcionalidades" class="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center max-w-3xl mx-auto mb-16">
+            <span class="text-xs font-bold text-blue-400 tracking-wider uppercase bg-blue-950/40 border border-blue-800/50 px-3 py-1 rounded-full">
+                Módulos Integrados
+            </span>
+            <h2 class="text-3xl sm:text-5xl font-extrabold text-white mt-4">
+                Tudo o que sua força de vendas precisa em um único sistema
+            </h2>
+            <p class="text-slate-400 mt-3 text-base">
+                Chega de assinar 5 ferramentas diferentes. O Radar unifica busca, contato, gestão e inteligência.
+            </p>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-6">
+            <!-- Card 1 -->
+            <div class="glass-panel p-7 rounded-2xl glass-panel-hover transition duration-300">
+                <div class="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 text-xl mb-5">
+                    <i class="fas fa-earth-americas"></i>
+                </div>
+                <h3 class="text-lg font-bold text-white mb-2">Filtro Geográfico Dinâmico</h3>
+                <p class="text-sm text-slate-400 leading-relaxed">
+                    Pesquise por raio de quilômetros, CEP ou Estado. Encontre concentrações de potenciais clientes com visão satélite e mapa de calor integrado.
+                </p>
+            </div>
+
+            <!-- Card 2 -->
+            <div class="glass-panel p-7 rounded-2xl glass-panel-hover transition duration-300">
+                <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 text-xl mb-5">
+                    <i class="fab fa-whatsapp"></i>
+                </div>
+                <h3 class="text-lg font-bold text-white mb-2">Robô WhatsApp Multi-Instância</h3>
+                <p class="text-sm text-slate-400 leading-relaxed">
+                    Conecte números da sua equipe. Agende mensagens em lote, envie propostas em PDF automaticamente e registre o histórico da conversa no CRM.
+                </p>
+            </div>
+
+            <!-- Card 3 -->
+            <div class="glass-panel p-7 rounded-2xl glass-panel-hover transition duration-300">
+                <div class="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 text-xl mb-5">
+                    <i class="fas fa-brain"></i>
+                </div>
+                <h3 class="text-lg font-bold text-white mb-2">Algoritmo de Score de Leads</h3>
+                <p class="text-sm text-slate-400 leading-relaxed">
+                    Nosso sistema pontua cada lead de 0 a 100 pontos baseado no capital social, porte e presença digital para priorizar quem realmente compra.
+                </p>
+            </div>
+
+            <!-- Card 4 -->
+            <div class="glass-panel p-7 rounded-2xl glass-panel-hover transition duration-300">
+                <div class="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 text-xl mb-5">
+                    <i class="fas fa-route"></i>
+                </div>
+                <h3 class="text-lg font-bold text-white mb-2">Gestão de Visitas & Rotas</h3>
+                <p class="text-sm text-slate-400 leading-relaxed">
+                    Gere rotas otimizadas com 1 clique para o Google Maps ou Waze. Seu consultor chega mais rápido nas reuniões presenciais.
+                </p>
+            </div>
+
+            <!-- Card 5 -->
+            <div class="glass-panel p-7 rounded-2xl glass-panel-hover transition duration-300">
+                <div class="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 text-xl mb-5">
+                    <i class="fas fa-bullseye"></i>
+                </div>
+                <h3 class="text-lg font-bold text-white mb-2">Metas & Performance de Equipe</h3>
+                <p class="text-sm text-slate-400 leading-relaxed">
+                    Acompanhe em tempo real quantos contatos cada vendedor fez hoje, taxa de resposta e faturamento conquistado no painel gerencial.
+                </p>
+            </div>
+
+            <!-- Card 6 -->
+            <div class="glass-panel p-7 rounded-2xl glass-panel-hover transition duration-300">
+                <div class="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 text-xl mb-5">
+                    <i class="fas fa-moon"></i>
+                </div>
+                <h3 class="text-lg font-bold text-white mb-2">Modo Claro & Escuro Nativo</h3>
+                <p class="text-sm text-slate-400 leading-relaxed">
+                    Interface ergonômica padrão Enterprise com suporte a temas dinâmicos (Dark/Light), garantindo conforto visual tanto no escritório quanto em campo.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- INTERACTIVE ROI CALCULATOR (O GANCHO DE CONVERSÃO MAIS FORTE) -->
+    <section id="simulador" class="py-20 bg-charcoal-950 border-t border-slate-800/80">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="glass-panel p-8 sm:p-12 rounded-3xl border border-blue-500/30 relative overflow-hidden shadow-2xl">
+                <div class="absolute -right-20 -top-20 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div class="text-center mb-10">
+                    <span class="text-xs font-bold text-emerald-400 tracking-wider uppercase bg-emerald-950/50 border border-emerald-800/50 px-3 py-1 rounded-full">
+                        Simulador de Crescimento
+                    </span>
+                    <h2 class="text-2xl sm:text-4xl font-extrabold text-white mt-3">
+                        Quanto dinheiro você está deixando na mesa todo mês?
+                    </h2>
+                    <p class="text-slate-400 text-sm mt-2">Arraste os seletores abaixo e veja a projeção estimada de novos contratos.</p>
+                </div>
+
+                <div class="space-y-8">
+                    <!-- Slider 1: Vendedores -->
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="text-sm font-semibold text-slate-200">Número de Vendedores / SDRs na sua equipe:</label>
+                            <span id="label-vendedores" class="text-base font-bold text-blue-400 font-mono">3 profissionais</span>
+                        </div>
+                        <input type="range" id="input-vendedores" min="1" max="20" value="3" 
+                               class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                               oninput="calcularROI()">
+                    </div>
+
+                    <!-- Slider 2: Ticket Médio -->
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="text-sm font-semibold text-slate-200">Ticket Médio por Contrato ou Venda:</label>
+                            <span id="label-ticket" class="text-base font-bold text-emerald-400 font-mono">R$ 2.500,00</span>
+                        </div>
+                        <input type="range" id="input-ticket" min="500" max="20000" step="500" value="2500" 
+                               class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                               oninput="calcularROI()">
+                    </div>
+
+                    <!-- Result Box -->
+                    <div class="p-6 rounded-2xl bg-slate-950 border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-6 text-center">
+                        <div>
+                            <p class="text-xs text-slate-400">Novos Contatos / Mês</p>
+                            <p id="res-contatos" class="text-2xl font-extrabold text-white font-mono mt-1">1.800</p>
+                            <p class="text-[10px] text-slate-500">Via WhatsApp + Mapa</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-slate-400">Novos Contratos Estimados</p>
+                            <p id="res-contratos" class="text-2xl font-extrabold text-blue-400 font-mono mt-1">+9 clientes</p>
+                            <p class="text-[10px] text-slate-500">Conversão conservadora (0.5%)</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-slate-400">Faturamento Extra Estimado</p>
+                            <p id="res-faturamento" class="text-2xl font-extrabold text-emerald-400 font-mono mt-1">R$ 22.500,00</p>
+                            <p class="text-[10px] text-emerald-500 font-semibold">Mensais Recorrentes</p>
+                        </div>
+                    </div>
+
+                    <div class="text-center pt-2">
+                        <a id="btn-roi-cta" href="https://wa.me/5592992920233?text=Ol%C3%A1%20Weverton%2C%20calculei%20no%20simulador%20uma%20proje%C3%A7%C3%A3o%20de%20R%24%2022.500%20com%203%20vendedores.%20Como%20implementar%20o%20Radar%3F" 
+                           target="_blank"
+                           class="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl text-base font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-xl shadow-emerald-950 transition duration-300">
+                            <i class="fab fa-whatsapp text-lg"></i>
+                            <span>Quero Capturar Esse Faturamento</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- PRICING MATRIX -->
+    <section id="precos" class="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center max-w-3xl mx-auto mb-16">
+            <span class="text-xs font-bold text-blue-400 tracking-wider uppercase bg-blue-950/40 border border-blue-800/50 px-3 py-1 rounded-full">
+                Planos & Investimento
+            </span>
+            <h2 class="text-3xl sm:text-5xl font-extrabold text-white mt-4">
+                Escolha o plano ideal para a sua escala
+            </h2>
+            <p class="text-slate-400 mt-3 text-base">
+                Planos flexíveis sem fidelidade forçada. Implantação e treinamento assistidos pela equipe WCTECH.
+            </p>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-8 items-stretch">
+            
+            <!-- PLANO 1: STARTER -->
+            <div class="glass-panel p-8 rounded-2xl border-slate-800 flex flex-col justify-between">
+                <div>
+                    <h3 class="text-xl font-bold text-white">Starter Solo</h3>
+                    <p class="text-xs text-slate-400 mt-1">Para consultores independentes e corretores B2B.</p>
+                    
+                    <div class="my-6">
+                        <span class="text-4xl font-extrabold text-white font-mono">R$ 297</span>
+                        <span class="text-slate-400 text-xs">/mês</span>
+                    </div>
+
+                    <ul class="space-y-3 text-xs text-slate-300 border-t border-slate-800 pt-6">
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-blue-400"></i> 1 Usuário / Acesso</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-blue-400"></i> Mapeamento de 1.000 leads/mês</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-blue-400"></i> 1 Conexão de WhatsApp</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-blue-400"></i> CRM Kanban Básico</li>
+                        <li class="flex items-center gap-2 text-slate-500"><i class="fas fa-times"></i> I.A. Copilot Avançada</li>
+                    </ul>
+                </div>
+
+                <a href="https://wa.me/5592992920233?text=Quero%20o%20Plano%20Starter%20Solo%20do%20Radar" target="_blank" 
+                   class="w-full mt-8 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold text-center block transition">
+                    Começar no Starter
+                </a>
+            </div>
+
+            <!-- PLANO 2: BUSINESS (DESTAQUE) -->
+            <div class="glass-panel p-8 rounded-2xl border-blue-500 relative flex flex-col justify-between shadow-2xl bg-gradient-to-b from-navy-900 to-charcoal-950">
+                <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-blue-600 text-white text-[10px] font-black uppercase tracking-wider shadow">
+                    MAIS POPULAR • RECOMENDADO
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-bold text-white">Business Escala</h3>
+                    <p class="text-xs text-slate-400 mt-1">Para empresas com times de vendas ativos e expansão rápida.</p>
+                    
+                    <div class="my-6">
+                        <span class="text-4xl font-extrabold text-blue-400 font-mono">R$ 697</span>
+                        <span class="text-slate-400 text-xs">/mês</span>
+                    </div>
+
+                    <ul class="space-y-3 text-xs text-slate-200 border-t border-slate-800 pt-6">
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-emerald-400"></i> Até 5 Usuários Comerciais</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-emerald-400"></i> Leads Ilimitados no Mapa</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-emerald-400"></i> Multi-WhatsApp (Disparos Simultâneos)</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-emerald-400"></i> I.A. Copilot de Vendas Integrada</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-emerald-400"></i> Roteirização de Visitas de Campo</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-emerald-400"></i> Treinamento VIP com Suporte Prioritário</li>
+                    </ul>
+                </div>
+
+                <a href="https://wa.me/5592992920233?text=Quero%20o%20Plano%20Business%20Escala%20do%20Radar" target="_blank" 
+                   class="w-full mt-8 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold text-center block transition shadow-lg shadow-blue-900/40">
+                    Contratar Business Escala
+                </a>
+            </div>
+
+            <!-- PLANO 3: ENTERPRISE -->
+            <div class="glass-panel p-8 rounded-2xl border-slate-800 flex flex-col justify-between">
+                <div>
+                    <h3 class="text-xl font-bold text-white">Enterprise White-Label</h3>
+                    <p class="text-xs text-slate-400 mt-1">Para grandes operações com necessidade de servidor próprio e customizações.</p>
+                    
+                    <div class="my-6">
+                        <span class="text-2xl font-extrabold text-white font-mono">Sob Consulta</span>
+                        <span class="text-slate-400 text-xs block mt-1">Setup personalizado</span>
+                    </div>
+
+                    <ul class="space-y-3 text-xs text-slate-300 border-t border-slate-800 pt-6">
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-purple-400"></i> Usuários Ilimitados</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-purple-400"></i> Domínio Próprio & Marca da sua Empresa</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-purple-400"></i> Banco de Dados Dedicado (PostgreSQL)</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-purple-400"></i> Integração com ERP/CRM legado via API</li>
+                        <li class="flex items-center gap-2"><i class="fas fa-check text-purple-400"></i> Gerente de Contas Exclusivo WCTECH</li>
+                    </ul>
+                </div>
+
+                <a href="https://wa.me/5592992920233?text=Tenho%20interesse%20no%20Plano%20Enterprise%20Personalizado" target="_blank" 
+                   class="w-full mt-8 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold text-center block transition">
+                    Falar com Engenharia WCTECH
+                </a>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- FAQ SECTION -->
+    <section id="faq" class="py-20 bg-charcoal-950 border-t border-slate-800">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <h2 class="text-2xl sm:text-4xl font-extrabold text-white">Perguntas Frequentes</h2>
+                <p class="text-slate-400 text-xs sm:text-sm mt-2">Tire suas dúvidas antes de começar</p>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Q1 -->
+                <div class="glass-panel rounded-xl p-5 border border-slate-800">
+                    <button class="w-full flex justify-between items-center text-left text-sm font-bold text-white" onclick="toggleFaq(this)">
+                        <span>Como o Radar encontra as empresas e telefones?</span>
+                        <i class="fas fa-chevron-down text-xs text-slate-400 transition-transform"></i>
+                    </button>
+                    <div class="faq-answer hidden mt-3 text-xs text-slate-400 leading-relaxed border-t border-slate-800/80 pt-3">
+                        O Radar de Oportunidades cruza dados públicos de geolocalização (OpenStreetMap/Google Places), registros empresariais públicos da Receita Federal e validação ativa de números de WhatsApp para entregar apenas contatos quentes e em operação na data da busca.
+                    </div>
+                </div>
+
+                <!-- Q2 -->
+                <div class="glass-panel rounded-xl p-5 border border-slate-800">
+                    <button class="w-full flex justify-between items-center text-left text-sm font-bold text-white" onclick="toggleFaq(this)">
+                        <span>Meu número de WhatsApp corre risco de ser banido?</span>
+                        <i class="fas fa-chevron-down text-xs text-slate-400 transition-transform"></i>
+                    </button>
+                    <div class="faq-answer hidden mt-3 text-xs text-slate-400 leading-relaxed border-t border-slate-800/80 pt-3">
+                        Não utilizamos disparadores piratas. O Radar possui um motor de cadência humanizada com intervalos variáveis, rotação de textos com I.A. e sistema de verificação prévia de número, o que reduz o risco de bloqueio a patamares praticamente nulos quando seguidas nossas diretrizes de envio.
+                    </div>
+                </div>
+
+                <!-- Q3 -->
+                <div class="glass-panel rounded-xl p-5 border border-slate-800">
+                    <button class="w-full flex justify-between items-center text-left text-sm font-bold text-white" onclick="toggleFaq(this)">
+                        <span>Preciso instalar algum programa pesado no computador?</span>
+                        <i class="fas fa-chevron-down text-xs text-slate-400 transition-transform"></i>
+                    </button>
+                    <div class="faq-answer hidden mt-3 text-xs text-slate-400 leading-relaxed border-t border-slate-800/80 pt-3">
+                        Não. A plataforma é 100% Web (SaaS) baseada em Next.js e nuvem ultra-rápida. Você pode acessar de qualquer computador, tablet ou até mesmo do celular no modo responsivo durante uma visita comercial.
+                    </div>
+                </div>
+
+                <!-- Q4 -->
+                <div class="glass-panel rounded-xl p-5 border border-slate-800">
+                    <button class="w-full flex justify-between items-center text-left text-sm font-bold text-white" onclick="toggleFaq(this)">
+                        <span>Como funciona o suporte e implantação?</span>
+                        <i class="fas fa-chevron-down text-xs text-slate-400 transition-transform"></i>
+                    </button>
+                    <div class="faq-answer hidden mt-3 text-xs text-slate-400 leading-relaxed border-t border-slate-800/80 pt-3">
+                        A WCTECH fornece suporte direto via WhatsApp para tirar dúvidas, além de sessões de onboarding guiadas onde configuramos o seu primeiro raio de prospecção e a primeira campanha de mensagens com você.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FOUNDER & WCTECH SIGNATURE SECTION -->
+    <section class="py-16 bg-navy-950 border-t border-slate-800/80">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="glass-panel rounded-3xl p-8 sm:p-10 border border-slate-700/60 flex flex-col md:flex-row items-center gap-8">
+                
+                <!-- Founder Avatar / Monogram -->
+                <div class="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl bg-gradient-to-tr from-navy-800 to-charcoal-700 border-2 border-blue-500/40 flex items-center justify-center text-white text-3xl font-extrabold shadow-2xl shrink-0">
+                    WC
+                </div>
+
+                <!-- Founder Content -->
+                <div class="flex-1 text-center md:text-left">
+                    <div class="flex items-center justify-center md:justify-start gap-2 mb-1">
+                        <h4 class="text-xl font-bold text-white">Weverton Castelo Branco</h4>
+                        <span class="text-emerald-400 text-xs" title="Engenheiro Responsável"><i class="fas fa-circle-check"></i></span>
+                    </div>
+                    <p class="text-xs text-blue-400 font-mono mb-3">Fundador & CTO • WCTECH Solutions</p>
+                    <p class="text-xs sm:text-sm text-slate-300 leading-relaxed mb-4">
+                        "Construímos o Radar de Oportunidades com o rigor de engenharia de software corporativo. Nossa missão é simples: transformar o processo caótico de prospecção B2B em uma esteira previsível e altamente lucrativa para qualquer negócio."
+                    </p>
+                    
+                    <div class="flex items-center justify-center md:justify-start gap-3">
+                        <a href="https://www.linkedin.com/in/weverton-castelo-branco-005b39355" target="_blank" 
+                           class="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 transition">
+                            <i class="fab fa-linkedin text-blue-400"></i> Perfil no LinkedIn
+                        </a>
+                        <a href="https://wa.me/5592992920233" target="_blank" 
+                           class="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 transition">
+                            <i class="fab fa-whatsapp text-emerald-400"></i> Contato Direto
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="bg-charcoal-950 border-t border-slate-900 py-10 text-xs text-slate-500">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded bg-slate-800 flex items-center justify-center text-[10px] font-bold text-white">RO</div>
+                <span class="text-slate-400 font-medium">Radar de Oportunidades PRO</span>
+            </div>
+            
+            <p>© 2024 WCTECH Solutions. Todos os direitos reservados. CNPJ & Compliance LGPD.</p>
+            
+            <div class="flex gap-4 text-slate-400">
+                <a href="#como-funciona" class="hover:text-white transition">Privacidade</a>
+                <a href="#como-funciona" class="hover:text-white transition">Termos de Uso</a>
+                <a href="https://wa.me/5592992920233" class="hover:text-white transition">Suporte Técnico</a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- INTERACTIVITY JAVASCRIPT -->
+    <script>
+        // Tab switching function
+        function switchTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.classList.add('hidden');
+                el.classList.remove('block');
+            });
+            
+            // Reset tab button states
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('bg-navy-700', 'text-white', 'border-blue-500/50');
+                btn.classList.add('bg-charcoal-900', 'text-slate-400', 'border-slate-800');
+            });
+
+            // Show selected tab
+            const targetContent = document.getElementById('content-' + tabName);
+            const targetBtn = document.getElementById('tab-' + tabName);
+
+            if (targetContent && targetBtn) {
+                targetContent.classList.remove('hidden');
+                targetContent.classList.add('block');
+                
+                targetBtn.classList.remove('bg-charcoal-900', 'text-slate-400', 'border-slate-800');
+                targetBtn.classList.add('bg-navy-700', 'text-white', 'border-blue-500/50');
+            }
+        }
+
+        // FAQ Toggle function
+        function toggleFaq(button) {
+            const answer = button.nextElementSibling;
+            const icon = button.querySelector('i');
+            
+            if (answer.classList.contains('hidden')) {
+                answer.classList.remove('hidden');
+                icon.style.transform = 'rotate(180deg)';
+            } else {
+                answer.classList.add('hidden');
+                icon.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        // Dynamic ROI Calculator
+        function calcularROI() {
+            const vendedores = parseInt(document.getElementById('input-vendedores').value);
+            const ticket = parseFloat(document.getElementById('input-ticket').value);
+
+            // Labels update
+            document.getElementById('label-vendedores').innerText = vendedores + (vendedores === 1 ? ' profissional' : ' profissionais');
+            document.getElementById('label-ticket').innerText = 'R$ ' + ticket.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+
+            // Calculations:
+            // ~600 contatos/mês por vendedor no Radar
+            const totalContatos = vendedores * 600;
+            // 0.5% a 1% de fechamento
+            const novosContratos = Math.max(1, Math.round(totalContatos * 0.005));
+            const faturamentoExtra = novosContratos * ticket;
+
+            // DOM Updates
+            document.getElementById('res-contatos').innerText = totalContatos.toLocaleString('pt-BR');
+            document.getElementById('res-contratos').innerText = '+' + novosContratos + ' clientes';
+            document.getElementById('res-faturamento').innerText = 'R$ ' + faturamentoExtra.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+
+            // WhatsApp link update with calculated values
+            const ctaBtn = document.getElementById('btn-roi-cta');
+            const mensagem = `Ol%C3%A1%20Weverton%2C%20calculei%20no%20simulador%20uma%20proje%C3%A7%C3%A3o%20de%20R%24%20${faturamentoExtra.toLocaleString('pt-BR')}%20com%20${vendedores}%20vendedores.%20Como%20implementar%20o%20Radar%3F`;
+            ctaBtn.href = `https://wa.me/5592992920233?text=${mensagem}`;
+        }
+    </script>
+</body>
+</html>

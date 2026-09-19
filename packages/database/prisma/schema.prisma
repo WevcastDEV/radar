@@ -1,0 +1,824 @@
+// ============================================
+// Radar de Oportunidades — Prisma Schema
+// PostgreSQL + PostGIS
+// ============================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis, uuidOssp(map: "uuid-ossp")]
+}
+
+// ============================================
+// AUTH & USERS
+// ============================================
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String
+  securityQuestion String? @map("security_question")
+  securityAnswerHash String? @map("security_answer_hash")
+  name          String
+  phone         String?
+  avatar        String?
+  roleId        String    @map("role_id")
+  teamId        String?   @map("team_id")
+  isActive      Boolean   @default(true) @map("is_active")
+  lastLoginAt   DateTime? @map("last_login_at")
+  refreshToken  String?   @map("refresh_token")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  role          Role      @relation(fields: [roleId], references: [id])
+  team          Team?     @relation(fields: [teamId], references: [id])
+
+  leadsAssigned    Lead[]        @relation("LeadResponsible")
+  activities       Activity[]
+  calls            Call[]
+  visits           Visit[]
+  proposals        Proposal[]
+  tasks            Task[]
+  notifications    Notification[]
+  salesByUser      Sale[]        @relation("SalesSeller")
+  goalsAssigned    Goal[]
+  auditLogs        AuditLog[]
+  messagesCreated  Message[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  slug        String           @unique
+  description String?
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  slug        String           @unique
+  module      String
+  action      String
+  description String?
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ============================================
+// SEGMENTS
+// ============================================
+
+model Segment {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  icon        String?
+  color       String?
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  leads       Lead[]
+  scoreRules  ScoreRule[]
+
+  @@map("segments")
+}
+
+// ============================================
+// LEADS & COMPANIES
+// ============================================
+
+model Lead {
+  id                  String        @id @default(uuid())
+  name                String
+  tradeName           String?       @map("trade_name")
+  companyName         String?       @map("company_name")
+  cnpj                String?       @unique
+  segmentId           String?       @map("segment_id")
+  responsibleId       String?       @map("responsible_id")
+  pipelineStageId     String?       @map("pipeline_stage_id")
+  status              LeadStatus    @default(NEW)
+  priority            Priority      @default(MEDIUM)
+  source              String?
+  estimatedEmployees  Int?          @map("estimated_employees")
+  estimatedArea       Float?        @map("estimated_area")
+  operatingHours      String?       @map("operating_hours")
+  isNightOperation    Boolean       @default(false) @map("is_night_operation")
+  is24hOperation      Boolean       @default(false) @map("is_24h_operation")
+  hasHighTraffic      Boolean       @default(false) @map("has_high_traffic")
+  hasLargeExterior    Boolean       @default(false) @map("has_large_exterior")
+  isNewBusiness       Boolean       @default(false) @map("is_new_business")
+  hasMultipleBranches Boolean       @default(false) @map("has_multiple_branches")
+  potentialValue      Float?        @map("potential_value")
+  foundedAt           DateTime?     @map("founded_at")
+  lastContactAt       DateTime?     @map("last_contact_at")
+  nextAction          String?       @map("next_action")
+  nextActionAt        DateTime?     @map("next_action_at")
+  notes               String?
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+  deletedAt           DateTime?     @map("deleted_at")
+
+  segment             Segment?      @relation(fields: [segmentId], references: [id])
+  responsible         User?         @relation("LeadResponsible", fields: [responsibleId], references: [id])
+  pipelineStage       PipelineStage? @relation(fields: [pipelineStageId], references: [id])
+
+  address             Address?
+  contacts            Contact[]
+  score               Score?
+  scoreFactors        ScoreFactor[]
+  activities          Activity[]
+  calls               Call[]
+  messages            Message[]
+  visits              Visit[]
+  proposals           Proposal[]
+  tasks               Task[]
+  attachments         Attachment[]
+  customer            Customer?
+  sales               Sale[]
+
+  @@index([status])
+  @@index([segmentId])
+  @@index([responsibleId])
+  @@index([pipelineStageId])
+  @@index([lastContactAt])
+  @@map("leads")
+}
+
+model Contact {
+  id        String      @id @default(uuid())
+  leadId    String      @map("lead_id")
+  type      ContactType
+  value     String
+  label     String?
+  isPrimary Boolean     @default(false) @map("is_primary")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  lead      Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@map("contacts")
+}
+
+model Address {
+  id           String   @id @default(uuid())
+  leadId       String   @unique @map("lead_id")
+  street       String?
+  number       String?
+  complement   String?
+  neighborhood String?
+  city         String?
+  state        String?
+  zipCode      String?  @map("zip_code")
+  country      String   @default("Brasil")
+  latitude     Float?
+  longitude    Float?
+  formattedAddress String? @map("formatted_address")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([city])
+  @@index([state])
+  @@index([neighborhood])
+  @@index([latitude, longitude])
+  @@map("addresses")
+}
+
+// ============================================
+// SCORING
+// ============================================
+
+model Score {
+  id        String   @id @default(uuid())
+  leadId    String   @unique @map("lead_id")
+  total     Int      @default(0)
+  level     ScoreLevel @default(LOW)
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@map("scores")
+}
+
+model ScoreRule {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  factor      String   @unique
+  points      Int
+  segmentId   String?  @map("segment_id")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  segment     Segment? @relation(fields: [segmentId], references: [id])
+
+  @@map("score_rules")
+}
+
+model ScoreFactor {
+  id        String   @id @default(uuid())
+  leadId    String   @map("lead_id")
+  factor    String
+  points    Int
+  label     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@map("score_factors")
+}
+
+// ============================================
+// PIPELINE / CRM
+// ============================================
+
+model Pipeline {
+  id        String          @id @default(uuid())
+  name      String
+  isDefault Boolean         @default(false) @map("is_default")
+  isActive  Boolean         @default(true) @map("is_active")
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  stages    PipelineStage[]
+
+  @@map("pipelines")
+}
+
+model PipelineStage {
+  id         String   @id @default(uuid())
+  pipelineId String   @map("pipeline_id")
+  name       String
+  slug       String
+  color      String?
+  order      Int
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  pipeline   Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  leads      Lead[]
+
+  @@unique([pipelineId, order])
+  @@map("pipeline_stages")
+}
+
+// ============================================
+// ACTIVITIES & INTERACTIONS
+// ============================================
+
+model Activity {
+  id          String       @id @default(uuid())
+  leadId      String       @map("lead_id")
+  userId      String       @map("user_id")
+  type        ActivityType
+  title       String
+  description String?
+  metadata    Json?
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id])
+
+  @@index([leadId])
+  @@index([userId])
+  @@map("activities")
+}
+
+model Call {
+  id          String     @id @default(uuid())
+  leadId      String     @map("lead_id")
+  userId      String     @map("user_id")
+  phone       String
+  direction   String     @default("outbound")
+  status      CallStatus @default(COMPLETED)
+  duration    Int?
+  result      String?
+  notes       String?
+  nextAction  String?    @map("next_action")
+  nextActionAt DateTime? @map("next_action_at")
+  calledAt    DateTime   @default(now()) @map("called_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  lead        Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id])
+
+  @@map("calls")
+}
+
+model Message {
+  id        String        @id @default(uuid())
+  leadId    String        @map("lead_id")
+  userId    String        @map("user_id")
+  channel   MessageChannel
+  direction String        @default("outbound")
+  content   String
+  status    MessageStatus @default(SENT)
+  sentAt    DateTime      @default(now()) @map("sent_at")
+  readAt    DateTime?     @map("read_at")
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  lead      Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id])
+
+  @@map("messages")
+}
+
+model Visit {
+  id           String      @id @default(uuid())
+  leadId       String      @map("lead_id")
+  userId       String      @map("user_id")
+  status       VisitStatus @default(SCHEDULED)
+  scheduledAt  DateTime    @map("scheduled_at")
+  startedAt    DateTime?   @map("started_at")
+  completedAt  DateTime?   @map("completed_at")
+  address      String?
+  latitude     Float?
+  longitude    Float?
+  notes        String?
+  outcome      String?
+  nextAction   String?     @map("next_action")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  lead         Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user         User        @relation(fields: [userId], references: [id])
+
+  @@index([scheduledAt])
+  @@map("visits")
+}
+
+// ============================================
+// PROPOSALS
+// ============================================
+
+model Proposal {
+  id              String         @id @default(uuid())
+  leadId          String         @map("lead_id")
+  userId          String         @map("user_id")
+  code            String         @unique
+  status          ProposalStatus @default(CREATED)
+  title           String
+  description     String?
+  subtotal        Float          @default(0)
+  discount        Float          @default(0)
+  total           Float          @default(0)
+  installationFee Float          @default(0) @map("installation_fee")
+  monthlyFee      Float          @default(0) @map("monthly_fee")
+  contractMonths  Int            @default(12) @map("contract_months")
+  validUntil      DateTime?      @map("valid_until")
+  sentAt          DateTime?      @map("sent_at")
+  viewedAt        DateTime?      @map("viewed_at")
+  acceptedAt      DateTime?      @map("accepted_at")
+  rejectedAt      DateTime?      @map("rejected_at")
+  rejectionReason String?        @map("rejection_reason")
+  notes           String?
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  deletedAt       DateTime?      @map("deleted_at")
+
+  lead            Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user            User           @relation(fields: [userId], references: [id])
+  items           ProposalItem[]
+
+  @@map("proposals")
+}
+
+model ProposalItem {
+  id          String   @id @default(uuid())
+  proposalId  String   @map("proposal_id")
+  productId   String?  @map("product_id")
+  serviceId   String?  @map("service_id")
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Float    @map("unit_price")
+  discount    Float    @default(0)
+  total       Float
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  proposal    Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  product     Product? @relation(fields: [productId], references: [id])
+  service     Service? @relation(fields: [serviceId], references: [id])
+
+  @@map("proposal_items")
+}
+
+// ============================================
+// PRODUCTS & SERVICES
+// ============================================
+
+model Product {
+  id            String         @id @default(uuid())
+  name          String
+  sku           String?        @unique
+  category      String
+  description   String?
+  price         Float
+  cost          Float?
+  brand         String?
+  model         String?
+  isActive      Boolean        @default(true) @map("is_active")
+  imageUrl      String?        @map("image_url")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  deletedAt     DateTime?      @map("deleted_at")
+
+  proposalItems ProposalItem[]
+
+  @@map("products")
+}
+
+model Service {
+  id            String         @id @default(uuid())
+  name          String
+  category      String
+  description   String?
+  price         Float
+  priceType     String         @default("fixed") @map("price_type")
+  isRecurring   Boolean        @default(false) @map("is_recurring")
+  isActive      Boolean        @default(true) @map("is_active")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  deletedAt     DateTime?      @map("deleted_at")
+
+  proposalItems ProposalItem[]
+
+  @@map("services")
+}
+
+// ============================================
+// CUSTOMERS & CONTRACTS
+// ============================================
+
+model Customer {
+  id                  String    @id @default(uuid())
+  leadId              String    @unique @map("lead_id")
+  contractNumber      String?   @unique @map("contract_number")
+  plan                String?
+  monthlyFee          Float?    @map("monthly_fee")
+  paymentDay          Int?      @map("payment_day")
+  technicalResponsible String?  @map("technical_responsible")
+  installationDate    DateTime? @map("installation_date")
+  equipmentDetails    Json?     @map("equipment_details")
+  status              CustomerStatus @default(ACTIVE)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  deletedAt           DateTime? @map("deleted_at")
+
+  lead                Lead      @relation(fields: [leadId], references: [id])
+  contracts           Contract[]
+
+  @@map("customers")
+}
+
+model Contract {
+  id          String         @id @default(uuid())
+  customerId  String         @map("customer_id")
+  number      String         @unique
+  type        String
+  startDate   DateTime       @map("start_date")
+  endDate     DateTime?      @map("end_date")
+  value       Float
+  monthlyFee  Float?         @map("monthly_fee")
+  status      ContractStatus @default(ACTIVE)
+  details     Json?
+  signedAt    DateTime?      @map("signed_at")
+  canceledAt  DateTime?      @map("canceled_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  customer    Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("contracts")
+}
+
+// ============================================
+// TASKS & NOTIFICATIONS
+// ============================================
+
+model Task {
+  id          String     @id @default(uuid())
+  leadId      String?    @map("lead_id")
+  userId      String     @map("user_id")
+  title       String
+  description String?
+  type        TaskType   @default(TODO)
+  priority    Priority   @default(MEDIUM)
+  status      TaskStatus @default(PENDING)
+  dueAt       DateTime?  @map("due_at")
+  completedAt DateTime?  @map("completed_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  lead        Lead?      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([dueAt])
+  @@map("tasks")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  message   String
+  data      Json?
+  isRead    Boolean          @default(false) @map("is_read")
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ============================================
+// TEAMS & GOALS
+// ============================================
+
+model Team {
+  id        String   @id @default(uuid())
+  name      String
+  managerId String?  @map("manager_id")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members   User[]
+  goals     Goal[]
+
+  @@map("teams")
+}
+
+model Goal {
+  id          String   @id @default(uuid())
+  userId      String?  @map("user_id")
+  teamId      String?  @map("team_id")
+  type        GoalType
+  target      Float
+  current     Float    @default(0)
+  month       Int
+  year        Int
+  segment     String?
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user        User?    @relation(fields: [userId], references: [id])
+  team        Team?    @relation(fields: [teamId], references: [id])
+
+  @@map("goals")
+}
+
+// ============================================
+// SALES
+// ============================================
+
+model Sale {
+  id          String   @id @default(uuid())
+  leadId      String   @map("lead_id")
+  sellerId    String   @map("seller_id")
+  proposalId  String?  @map("proposal_id")
+  value       Float
+  monthlyFee  Float?   @map("monthly_fee")
+  products    Json?
+  notes       String?
+  closedAt    DateTime @default(now()) @map("closed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  lead        Lead     @relation(fields: [leadId], references: [id])
+  seller      User     @relation("SalesSeller", fields: [sellerId], references: [id])
+
+  @@map("sales")
+}
+
+// ============================================
+// ATTACHMENTS
+// ============================================
+
+model Attachment {
+  id          String   @id @default(uuid())
+  leadId      String?  @map("lead_id")
+  fileName    String   @map("file_name")
+  fileType    String   @map("file_type")
+  fileSize    Int      @map("file_size")
+  fileUrl     String   @map("file_url")
+  uploadedBy  String   @map("uploaded_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+// ============================================
+// AUDIT
+// ============================================
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  action     String
+  entity     String
+  entityId   String?  @map("entity_id")
+  oldData    Json?    @map("old_data")
+  newData    Json?    @map("new_data")
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  VISIT_SCHEDULED
+  PROPOSAL_SENT
+  NEGOTIATION
+  WON
+  LOST
+  INACTIVE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ContactType {
+  PHONE
+  WHATSAPP
+  EMAIL
+  WEBSITE
+  OTHER
+}
+
+enum ScoreLevel {
+  LOW
+  MEDIUM
+  GOOD
+  HIGH
+  PRIORITY
+}
+
+enum ActivityType {
+  NOTE
+  CALL
+  EMAIL
+  WHATSAPP
+  VISIT
+  PROPOSAL
+  STATUS_CHANGE
+  SCORE_UPDATE
+  ASSIGNMENT
+  TASK
+  OTHER
+}
+
+enum CallStatus {
+  COMPLETED
+  NO_ANSWER
+  BUSY
+  VOICEMAIL
+  CALLBACK
+  WRONG_NUMBER
+}
+
+enum MessageChannel {
+  WHATSAPP
+  EMAIL
+  SMS
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum VisitStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+  RESCHEDULED
+}
+
+enum ProposalStatus {
+  CREATED
+  SENT
+  VIEWED
+  NEGOTIATION
+  ACCEPTED
+  REJECTED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  CANCELED
+}
+
+enum ContractStatus {
+  ACTIVE
+  EXPIRED
+  CANCELED
+  RENEWED
+}
+
+enum TaskType {
+  TODO
+  CALL
+  VISIT
+  EMAIL
+  WHATSAPP
+  FOLLOW_UP
+  REMINDER
+  OTHER
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+}
+
+enum NotificationType {
+  NEW_LEAD
+  PRIORITY_LEAD
+  VISIT_REMINDER
+  PROPOSAL_UPDATE
+  LEAD_NO_CONTACT
+  GOAL_PROGRESS
+  TASK_DUE
+  SYSTEM
+}
+
+enum GoalType {
+  SALES_COUNT
+  SALES_VALUE
+  VISITS
+  CALLS
+  PROPOSALS
+  CONVERSION
+}

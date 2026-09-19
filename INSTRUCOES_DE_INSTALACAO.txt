@@ -1,0 +1,43 @@
+============================================================
+  🎯 RADAR DE OPORTUNIDADES - WEV ENGINEER
+  Guia de Instalação e Uso Rápido para o Cliente
+============================================================
+
+Olá! Para rodar o Radar de Oportunidades no seu computador,
+o processo é 100% automático. Siga os passos abaixo:
+
+------------------------------------------------------------
+PASSO 1: Ter o Node.js instalado no computador
+------------------------------------------------------------
+* Se o seu computador já tem o Node.js, pule para o Passo 2.
+* Se ainda não tiver, baixe a versão recomendada (LTS) no site oficial:
+  👉 https://nodejs.org/
+* A instalação é padrão do Windows: basta clicar em "Avançar" até concluir.
+
+------------------------------------------------------------
+PASSO 2: Iniciar o Programa
+------------------------------------------------------------
+* Dê dois cliques no arquivo:
+  👉 INICIAR.bat
+
+* O instalador inteligente fará tudo sozinho:
+  1. Instala as dependências na primeira execução;
+  2. Compila o painel para navegação ultra-rápida;
+  3. Inicia o servidor e o robô do WhatsApp;
+  4. Abre o seu navegador automaticamente em:
+     http://localhost:3000
+
+------------------------------------------------------------
+PASSO 3: Conectar seu WhatsApp
+------------------------------------------------------------
+1. No painel do sistema no navegador, acesse a aba "WhatsApp" ou "Configurações";
+2. O QR Code aparecerá na tela pronto para leitura;
+3. No seu celular, abra o WhatsApp > "Aparelhos conectados" > "Conectar aparelho";
+4. Aponte a câmera para o QR Code da tela;
+5. Pronto! O robô estará pareado e pronto para prospecção e atendimento.
+
+------------------------------------------------------------
+Dicas Úteis:
+* Se precisar trocar de aparelho ou ler outro QR Code, basta clicar no botão "Gerar Novo QR Code" ou "Trocar Aparelho" na tela do WhatsApp.
+* Para fechar o sistema, basta fechar as janelas do terminal.
+============================================================
