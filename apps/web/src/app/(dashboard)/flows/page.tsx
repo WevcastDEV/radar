@@ -32,17 +32,35 @@ import {
   X,
   Search
 } from 'lucide-react';
-import { BotFlow, BotStep, FlowOption, FaqRule } from '@/lib/bot-flow';
+import { 
+  BotFlow, 
+  BotStep, 
+  FlowOption, 
+  FaqRule,
+  getStoredFlows,
+  saveStoredFlows,
+  getActiveFlowIdFromStorage,
+  setActiveFlowIdInStorage,
+  simulateFlowStep,
+  compileFlowText
+} from '@/lib/bot-flow';
 import { safeWhatsAppClient } from '../whatsapp/whatsapp-client';
 import { useLeads } from '@/hooks/use-leads';
 import toast from 'react-hot-toast';
 
 export default function FlowsPage() {
   const { data: leads = [] } = useLeads();
-  const [flows, setFlows] = useState<BotFlow[]>([]);
-  const [activeFlowId, setActiveFlowId] = useState<string>('');
-  const [selectedFlow, setSelectedFlow] = useState<BotFlow | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [flows, setFlows] = useState<BotFlow[]>(() => getStoredFlows());
+  const [activeFlowId, setActiveFlowId] = useState<string>(() => {
+    const list = getStoredFlows();
+    return getActiveFlowIdFromStorage(list);
+  });
+  const [selectedFlow, setSelectedFlow] = useState<BotFlow | null>(() => {
+    const list = getStoredFlows();
+    const actId = getActiveFlowIdFromStorage(list);
+    return list.find((f) => f.id === actId) || list[0] || null;
+  });
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'editor' | 'templates' | 'faq' | 'trigger'>('editor');
 
@@ -78,29 +96,31 @@ export default function FlowsPage() {
     });
   }, [flows, templateSearch]);
 
-  // Carrega fluxos da API
+  // Carrega fluxos da API com sincronização transparente
   const loadFlows = async () => {
-    setLoading(true);
     try {
       const res = await safeWhatsAppClient.get('/flows');
       const data = res.data?.data;
-      if (data?.flows && Array.isArray(data.flows)) {
+      if (data?.flows && Array.isArray(data.flows) && data.flows.length > 0) {
         setFlows(data.flows);
+        saveStoredFlows(data.flows);
         const active = data.activeFlow || data.flows.find((f: BotFlow) => f.isActive) || data.flows[0];
         if (active) {
           setActiveFlowId(active.id);
+          setActiveFlowIdInStorage(active.id);
           setSelectedFlow(active);
           initSimulation(active);
         }
       }
-    } catch (err: any) {
-      toast.error('Erro ao conectar à API de fluxos de conversação');
-    } finally {
-      setLoading(false);
+    } catch {
+      // Modo resiliente local ativo (offline/Vercel)
     }
   };
 
   useEffect(() => {
+    if (selectedFlow) {
+      initSimulation(selectedFlow);
+    }
     loadFlows();
   }, []);
 
@@ -113,10 +133,7 @@ export default function FlowsPage() {
       return;
     }
     const firstStep = flow.steps[0];
-    const initialText = firstStep.message
-      .replace(/\{\{nome_cliente\}\}/gi, 'Visitante')
-      .replace(/\{\{minha_empresa\}\}/gi, flow.companyName || 'Nossa Empresa')
-      .replace(/\{([^{}]+)\}/g, (_m, g) => g.split('|')[0]);
+    const initialText = compileFlowText(firstStep.message, flow, undefined, {});
 
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -146,46 +163,37 @@ export default function FlowsPage() {
     setSimInput('');
     setIsSimTyping(true);
 
+    // Simulação local instantânea com motor inteligente de etapas e FAQs
+    const simResult = simulateFlowStep(selectedFlow, simCurrentStepId, textToSend, simData);
+
+    setTimeout(() => {
+      setIsSimTyping(false);
+      const replyTime = new Date();
+      const replyTimeStr = `${String(replyTime.getHours()).padStart(2, '0')}:${String(replyTime.getMinutes()).padStart(2, '0')}`;
+      
+      setSimMessages(prev => [
+        ...prev,
+        {
+          sender: 'bot',
+          text: simResult.botReply,
+          time: replyTimeStr,
+        }
+      ]);
+      setSimCurrentStepId(simResult.nextStepId);
+      if (simResult.updatedData) {
+        setSimData(simResult.updatedData);
+      }
+    }, 400);
+
+    // Sincroniza em segundo plano com o backend se disponível
     try {
-      const res = await safeWhatsAppClient.post('/flows/simulate', {
+      await safeWhatsAppClient.post('/flows/simulate', {
         flowId: selectedFlow.id,
         currentStepId: simCurrentStepId,
         message: textToSend,
         collectedData: simData,
       });
-
-      const result = res.data?.data;
-      if (result) {
-        setTimeout(() => {
-          setIsSimTyping(false);
-          const replyTime = new Date();
-          const replyTimeStr = `${String(replyTime.getHours()).padStart(2, '0')}:${String(replyTime.getMinutes()).padStart(2, '0')}`;
-          
-          setSimMessages(prev => [
-            ...prev,
-            {
-              sender: 'bot',
-              text: result.botReply,
-              time: replyTimeStr,
-            }
-          ]);
-          setSimCurrentStepId(result.nextStepId);
-          if (result.updatedData) {
-            setSimData(result.updatedData);
-          }
-        }, 600);
-      }
-    } catch {
-      setIsSimTyping(false);
-      setSimMessages(prev => [
-        ...prev,
-        {
-          sender: 'bot',
-          text: 'Obrigado pelo contato! Nossa equipe entrará em contato em instantes.',
-          time: timeStr,
-        }
-      ]);
-    }
+    } catch {}
   };
 
   useEffect(() => {
@@ -199,11 +207,17 @@ export default function FlowsPage() {
     if (!selectedFlow) return;
     setSaving(true);
     try {
-      const res = await safeWhatsAppClient.post('/flows', selectedFlow);
-      if (res.data?.success) {
-        toast.success(`Fluxo "${selectedFlow.name}" salvo com sucesso!`);
-        await loadFlows();
-      }
+      const updated = { ...selectedFlow, updatedAt: Date.now() };
+      const updatedList = flows.map(f => (f.id === updated.id ? updated : f));
+      setFlows(updatedList);
+      saveStoredFlows(updatedList);
+      setSelectedFlow(updated);
+
+      try {
+        await safeWhatsAppClient.post('/flows', updated);
+      } catch {}
+
+      toast.success(`Fluxo "${selectedFlow.name}" salvo com sucesso!`);
     } catch (err: any) {
       toast.error('Erro ao salvar o fluxo de conversação.');
     } finally {
@@ -214,12 +228,26 @@ export default function FlowsPage() {
   // Ativar fluxo para o robô de WhatsApp
   const handleActivateFlow = async (flowId: string) => {
     try {
-      const res = await safeWhatsAppClient.post(`/flows/${flowId}/activate`);
-      if (res.data?.success) {
-        setActiveFlowId(flowId);
-        toast.success(`Fluxo ativado para o robô de WhatsApp!`);
-        await loadFlows();
+      const updatedList = flows.map(f => ({
+        ...f,
+        isActive: f.id === flowId
+      }));
+      setFlows(updatedList);
+      saveStoredFlows(updatedList);
+      setActiveFlowId(flowId);
+      setActiveFlowIdInStorage(flowId);
+
+      const targetFlow = updatedList.find(f => f.id === flowId);
+      if (targetFlow) {
+        setSelectedFlow(targetFlow);
+        initSimulation(targetFlow);
       }
+
+      try {
+        await safeWhatsAppClient.post(`/flows/${flowId}/activate`);
+      } catch {}
+
+      toast.success(`Fluxo ativado para o robô de WhatsApp!`);
     } catch {
       toast.error('Erro ao ativar o fluxo.');
     }

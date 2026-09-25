@@ -896,47 +896,6 @@ export class WhatsappService implements OnModuleInit {
       return;
     }
 
-    // 🤖 Pré-Vendedor SDR Inteligente de Custo Zero (Multi-Nicho)
-    if (this.sdrConfig && this.sdrConfig.enabled) {
-      // 1. Intenção de Preço / Orçamento
-      const isPriceIntent = /\b(quanto\s*custa|qual\s*o\s*valor|preco|orcamento|tabela|quanto\s*e|valores|custo|orcar)\b/i.test(normalized);
-      if (isPriceIntent) {
-        const reply = parseSpintax(this.sdrConfig.intentResponses.price);
-        await this.sendMessage(senderId, reply, undefined, 'service');
-        this.logger.log(`🤖 [SDR Custo Zero] Resposta de Preço/Orçamento enviada para ${senderId}`);
-        return;
-      }
-
-      // 2. Intenção de Interesse Positivo / Confirmação (COM DEFESA ANTI-FALSO-POSITIVO)
-      const hasNegation = /\b(nao|n|ñ|sem|nem|nunca|jamais|dispens|recus)\b/i.test(normalized);
-      const isPositiveIntent = !hasNegation && /\b(sim|tenho\s*interesse|pode\s*mandar|gostaria|pode\s*sim|quero|manda\s*ai|com\s*certeza|mande|claro|perfeito)\b/i.test(normalized);
-      if (isPositiveIntent) {
-        const reply = parseSpintax(this.sdrConfig.intentResponses.interested);
-        await this.sendMessage(senderId, reply, undefined, 'service');
-        this.logger.log(`🤖 [SDR Custo Zero] Resposta de Interesse/Catálogo enviada para ${senderId}`);
-        return;
-      }
-
-      // 3. Intenção de Mais Informações / Explicação
-      const isMoreInfoIntent = /\b(como\s*funciona|me\s*explica|detalhes|apresentacao|catalogo|portfolio|informacoes)\b/i.test(normalized);
-      if (isMoreInfoIntent) {
-        const reply = parseSpintax(this.sdrConfig.intentResponses.moreInfo);
-        await this.sendMessage(senderId, reply, undefined, 'service');
-        this.logger.log(`🤖 [SDR Custo Zero] Resposta de Detalhes enviada para ${senderId}`);
-        return;
-      }
-
-      // 4. Intenção de Atendimento Humano
-      const isHumanIntent = /\b(atendente|humano|falar\s*com|ligar|telefone|responsavel|weverton)\b/i.test(normalized);
-      if (isHumanIntent) {
-        const reply = parseSpintax(this.sdrConfig.intentResponses.human);
-        await this.sendMessage(senderId, reply, undefined, 'service');
-        this.registerHumanIntervention(senderId);
-        this.logger.log(`🤖 [SDR Custo Zero] Transferência para Humano realizada para ${senderId}`);
-        return;
-      }
-    }
-
     const existingSession = this.userSessions.get(senderId);
 
     // Se a conversa já foi finalizada ou transferida para o humano, o robô NÃO envia mais mensagens automáticas
@@ -952,7 +911,7 @@ export class WhatsappService implements OnModuleInit {
       }
     }
 
-    // 🌿 Processamento pelo Fluxo de Conversação Configurável Ativo
+    // 🌿 1. Processamento pelo Fluxo de Conversação Configurável Ativo (PRIORIDADE MÁXIMA)
     const activeFlow = this.botFlowService?.getActiveFlow();
     if (activeFlow && activeFlow.steps && activeFlow.steps.length > 0) {
       const history = this.getDispatchedHistory();
@@ -993,6 +952,47 @@ export class WhatsappService implements OnModuleInit {
         }
       }
       return;
+    }
+
+    // 🤖 2. Fallback: Pré-Vendedor SDR Inteligente de Custo Zero (Multi-Nicho)
+    if (this.sdrConfig && this.sdrConfig.enabled) {
+      // 1. Intenção de Preço / Orçamento
+      const isPriceIntent = /\b(quanto\s*custa|qual\s*o\s*valor|preco|orcamento|tabela|quanto\s*e|valores|custo|orcar)\b/i.test(normalized);
+      if (isPriceIntent) {
+        const reply = parseSpintax(this.sdrConfig.intentResponses.price);
+        await this.sendMessage(senderId, reply, undefined, 'service');
+        this.logger.log(`🤖 [SDR Custo Zero] Resposta de Preço/Orçamento enviada para ${senderId}`);
+        return;
+      }
+
+      // 2. Intenção de Interesse Positivo / Confirmação (COM DEFESA ANTI-FALSO-POSITIVO)
+      const hasNegation = /\b(nao|n|ñ|sem|nem|nunca|jamais|dispens|recus)\b/i.test(normalized);
+      const isPositiveIntent = !hasNegation && /\b(sim|tenho\s*interesse|pode\s*mandar|gostaria|pode\s*sim|quero|manda\s*ai|com\s*certeza|mande|claro|perfeito)\b/i.test(normalized);
+      if (isPositiveIntent) {
+        const reply = parseSpintax(this.sdrConfig.intentResponses.interested);
+        await this.sendMessage(senderId, reply, undefined, 'service');
+        this.logger.log(`🤖 [SDR Custo Zero] Resposta de Interesse/Catálogo enviada para ${senderId}`);
+        return;
+      }
+
+      // 3. Intenção de Mais Informações / Explicação
+      const isMoreInfoIntent = /\b(como\s*funciona|me\s*explica|detalhes|apresentacao|catalogo|portfolio|informacoes)\b/i.test(normalized);
+      if (isMoreInfoIntent) {
+        const reply = parseSpintax(this.sdrConfig.intentResponses.moreInfo);
+        await this.sendMessage(senderId, reply, undefined, 'service');
+        this.logger.log(`🤖 [SDR Custo Zero] Resposta de Detalhes enviada para ${senderId}`);
+        return;
+      }
+
+      // 4. Intenção de Atendimento Humano
+      const isHumanIntent = /\b(atendente|humano|falar\s*com|ligar|telefone|responsavel|weverton)\b/i.test(normalized);
+      if (isHumanIntent) {
+        const reply = parseSpintax(this.sdrConfig.intentResponses.human);
+        await this.sendMessage(senderId, reply, undefined, 'service');
+        this.registerHumanIntervention(senderId);
+        this.logger.log(`🤖 [SDR Custo Zero] Transferência para Humano realizada para ${senderId}`);
+        return;
+      }
     }
 
     const session: UserSession = this.userSessions.get(senderId) || { step: 'INICIO', data: {} };

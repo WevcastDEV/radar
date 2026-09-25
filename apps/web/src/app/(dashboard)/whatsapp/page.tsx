@@ -76,6 +76,7 @@ import { DispatchSafetyPanel } from './dispatch-safety-panel';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { formatBrazilianPhone, toWhatsAppJidDigits, extractPhoneVariants } from '@/lib/phone-utils';
 import { getOrCreateDeviceId, getDeviceName, setDeviceName } from '@/lib/device-id';
+import { getStoredFlows, getActiveFlowIdFromStorage } from '@/lib/bot-flow';
 
 // Normalização e extração de variantes de números de telefone para proteção anti-reenvio
 const extractPhoneDigitsVariants = (raw: string): string[] => {
@@ -239,6 +240,19 @@ export default function WhatsAppBotPage() {
     }
   });
   const [isSavingSdr, setIsSavingSdr] = useState(false);
+
+  // 🌿 Fluxo Ativo de Conversação do Robô
+  const [activeFlowLabel, setActiveFlowLabel] = useState<string>('Carregando...');
+  useEffect(() => {
+    try {
+      const list = getStoredFlows();
+      const actId = getActiveFlowIdFromStorage(list);
+      const found = list.find((f) => f.id === actId) || list[0];
+      if (found) {
+        setActiveFlowLabel(`${found.name}`);
+      }
+    } catch {}
+  }, []);
 
   // Status da conexão e isolamento por computador
   const [deviceId, setDeviceId] = useState<string>('');
@@ -2011,8 +2025,13 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
               className="h-9 px-3 text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
               title="Configurar fluxo interativo de perguntas, opções e respostas para o robô"
             >
-              <GitBranch className="w-3.5 h-3.5" />
-              🌿 Fluxos de Conversa
+              <GitBranch className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+              <span>🌿 Fluxos de Conversa</span>
+              {activeFlowLabel && activeFlowLabel !== 'Carregando...' && (
+                <span className="max-w-[130px] truncate text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold border border-emerald-500/30">
+                  {activeFlowLabel}
+                </span>
+              )}
             </Button>
           </Link>
 
