@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
+import { getPersistentProfile } from '@/lib/user-profiles';
 
 const LINKEDIN_URL = 'https://www.linkedin.com/in/weverton-castelo-branco-005b39355';
 const WHATSAPP_URL = 'https://wa.me/5592992920233';
@@ -33,6 +34,7 @@ export interface SavedAccount {
   name: string;
   role: string;
   lastUsedAt: number;
+  avatar?: string;
 }
 
 const DEFAULT_PRESET_ACCOUNTS: SavedAccount[] = [
@@ -86,6 +88,17 @@ export default function LoginPage() {
         accounts = DEFAULT_PRESET_ACCOUNTS;
         localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(DEFAULT_PRESET_ACCOUNTS));
       }
+
+      // Mescla com perfis customizados persistentes (foto, nome)
+      accounts = accounts.map((acc) => {
+        const p = getPersistentProfile(acc.identifier);
+        if (!p) return acc;
+        return {
+          ...acc,
+          name: p.name || acc.name,
+          avatar: p.avatar !== undefined ? p.avatar : acc.avatar,
+        };
+      });
 
       setSavedAccounts(accounts);
 
@@ -184,6 +197,7 @@ export default function LoginPage() {
           (a) => a.identifier.toLowerCase() === normalizedIdentifier.toLowerCase()
         );
 
+        const profile = getPersistentProfile(normalizedIdentifier);
         let updatedList: SavedAccount[] = [];
         if (existingIdx >= 0) {
           updatedList = [...savedAccounts];
@@ -191,17 +205,19 @@ export default function LoginPage() {
             ...updatedList[existingIdx],
             password: password,
             lastUsedAt: Date.now(),
+            name: profile?.name || updatedList[existingIdx].name,
+            avatar: profile?.avatar !== undefined ? profile?.avatar : updatedList[existingIdx].avatar,
           };
         } else {
           // Detecta papel preliminar pelo nome
           let detectedRole = 'Usuário';
-          let detectedName = normalizedIdentifier.split('@')[0];
+          let detectedName = profile?.name || normalizedIdentifier.split('@')[0];
           if (normalizedIdentifier.toLowerCase().includes('admin')) {
             detectedRole = 'Admin';
-            detectedName = 'Administrador';
+            detectedName = profile?.name || 'Administrador';
           } else if (normalizedIdentifier.toLowerCase().includes('gestor')) {
             detectedRole = 'Gestor';
-            detectedName = 'Gestor Comercial';
+            detectedName = profile?.name || 'Gestor Comercial';
           }
 
           updatedList = [
@@ -211,6 +227,7 @@ export default function LoginPage() {
               name: detectedName,
               role: detectedRole,
               lastUsedAt: Date.now(),
+              avatar: profile?.avatar,
             },
             ...savedAccounts,
           ];
@@ -278,13 +295,26 @@ export default function LoginPage() {
                         }`}
                         title={`Entrar com ${acc.name} (${acc.identifier})`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold truncate max-w-[90px]">{acc.name}</span>
-                          <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-primary/15 text-primary font-bold">
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {acc.avatar ? (
+                              <img
+                                src={acc.avatar}
+                                alt={acc.name}
+                                className="w-5 h-5 rounded-full object-cover shrink-0 border border-primary/40 shadow-xs"
+                              />
+                            ) : (
+                              <div className="w-5 h-5 rounded-full bg-primary/20 text-primary font-bold text-[10px] flex items-center justify-center shrink-0">
+                                {acc.name.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <span className="text-xs font-bold truncate max-w-[80px]">{acc.name}</span>
+                          </div>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-primary/15 text-primary font-bold shrink-0">
                             {acc.role}
                           </span>
                         </div>
-                        <span className="text-[10px] text-muted-foreground truncate block mt-0.5">
+                        <span className="text-[10px] text-muted-foreground truncate block mt-0.5 pl-6.5">
                           {acc.identifier}
                         </span>
 

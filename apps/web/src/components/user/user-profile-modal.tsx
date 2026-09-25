@@ -18,6 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthStore } from '@/stores/auth-store';
+import { savePersistentProfile } from '@/lib/user-profiles';
 import toast from 'react-hot-toast';
 
 interface UserProfileModalProps {
@@ -108,7 +109,7 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
 
     setSaving(true);
     try {
-      // 1. Atualizar no store Zustand e localStorage do navegador
+      // 1. Atualizar no store Zustand, localStorage e registro persistente de perfis
       const updatedUser = {
         ...(user || {
           id: 'user-admin',
@@ -119,6 +120,7 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
         avatar: avatar || undefined,
       };
 
+      savePersistentProfile(updatedUser);
       setUser(updatedUser);
 
       // 2. Atualizar contas salvas se houver

@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { LoginRequest, LoginResponse, UserProfile, ApiResponse } from '@radar/types';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
+import { mergeWithPersistentProfile, savePersistentProfile } from '@/lib/user-profiles';
 
 const PRESET_ACCOUNTS = [
   { identifier: 'admin@radar.com', password: 'radar123', name: 'Administrador', role: 'Admin' },
@@ -64,15 +65,17 @@ export function useAuth() {
               })
             ).toString('base64url');
 
+            const baseUser = {
+              id: `user-${presetMatch.role.toLowerCase()}`,
+              email: presetMatch.identifier,
+              name: presetMatch.name,
+              role: roleObj,
+            };
+
             return {
               accessToken: `radar_jwt_${token}`,
               refreshToken: `radar_ref_${token}`,
-              user: {
-                id: `user-${presetMatch.role.toLowerCase()}`,
-                email: presetMatch.identifier,
-                name: presetMatch.name,
-                role: roleObj,
-              },
+              user: mergeWithPersistentProfile(baseUser),
             } as unknown as LoginResponse;
           }
 
@@ -103,15 +106,18 @@ export function useAuth() {
                     })
                   ).toString('base64url');
 
+                  const baseUser = {
+                    id: `user-${Date.now()}`,
+                    email: match.identifier,
+                    name: match.name || idLower.split('@')[0],
+                    role: roleObj,
+                    avatar: match.avatar,
+                  };
+
                   return {
                     accessToken: `radar_jwt_${token}`,
                     refreshToken: `radar_ref_${token}`,
-                    user: {
-                      id: `user-${Date.now()}`,
-                      email: match.identifier,
-                      name: match.name || idLower.split('@')[0],
-                      role: roleObj,
-                    },
+                    user: mergeWithPersistentProfile(baseUser),
                   } as unknown as LoginResponse;
                 }
               }
@@ -126,7 +132,9 @@ export function useAuth() {
     },
     onSuccess: (data) => {
       setTokens(data.accessToken, data.refreshToken);
-      setUser(data.user);
+      const mergedUser = mergeWithPersistentProfile(data.user);
+      savePersistentProfile(mergedUser);
+      setUser(mergedUser);
       router.push('/');
       toast.success('Bem-vindo ao Radar de Oportunidades!');
     },
@@ -153,11 +161,16 @@ export function useAuth() {
       queryFn: async () => {
         try {
           const response = await api.get<ApiResponse<UserProfile>>('/auth/me');
+          if (response.data.data) {
+            const merged = mergeWithPersistentProfile(response.data.data);
+            setUser(merged);
+            return merged;
+          }
           return response.data.data!;
         } catch {
           const currentUser = useAuthStore.getState().user;
           if (currentUser) return currentUser;
-          return {
+          return mergeWithPersistentProfile({
             id: 'user-admin',
             email: 'admin@radar.com',
             name: 'Administrador',
@@ -166,7 +179,7 @@ export function useAuth() {
               name: 'Admin',
               slug: 'admin',
             },
-          } as unknown as UserProfile;
+          } as unknown as UserProfile);
         }
       },
       retry: false,

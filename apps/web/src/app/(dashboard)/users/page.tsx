@@ -22,6 +22,7 @@ import toast from 'react-hot-toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useAuthStore } from '@/stores/auth-store';
 import { UserProfileModal } from '@/components/user/user-profile-modal';
+import { getPersistentProfile, savePersistentProfile } from '@/lib/user-profiles';
 
 interface UserSystemItem {
   id: string;
@@ -47,13 +48,25 @@ export default function UsersPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [users, setUsers] = useState<UserSystemItem[]>(() => {
+    let baseList = INITIAL_USERS;
     if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem('radar_system_users_v1');
-        if (saved) return JSON.parse(saved);
+        if (saved) {
+          baseList = JSON.parse(saved);
+        }
       } catch {}
     }
-    return INITIAL_USERS;
+
+    return baseList.map((u) => {
+      const p = getPersistentProfile(u.email, u.id);
+      if (!p) return u;
+      return {
+        ...u,
+        name: p.name || u.name,
+        avatar: p.avatar !== undefined ? p.avatar : u.avatar,
+      };
+    });
   });
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -82,16 +95,33 @@ export default function UsersPage() {
   // Sync if current user profile changes
   useEffect(() => {
     if (currentUser?.email) {
-      setUsers(prev => prev.map(u => {
-        if (u.email.toLowerCase() === currentUser.email.toLowerCase()) {
-          return {
-            ...u,
-            name: currentUser.name || u.name,
-            avatar: currentUser.avatar || u.avatar,
-          };
+      setUsers((prev) => {
+        const exists = prev.some((u) => u.email.toLowerCase() === currentUser.email.toLowerCase());
+        if (!exists) {
+          return [
+            {
+              id: currentUser.id || 'USR-ADMIN',
+              name: currentUser.name || 'Administrador',
+              email: currentUser.email,
+              role: 'Administrador',
+              avatar: currentUser.avatar,
+              status: 'Ativo',
+              lastLogin: 'Agora mesmo',
+            },
+            ...prev,
+          ];
         }
-        return u;
-      }));
+        return prev.map((u) => {
+          if (u.email.toLowerCase() === currentUser.email.toLowerCase()) {
+            return {
+              ...u,
+              name: currentUser.name || u.name,
+              avatar: currentUser.avatar !== undefined ? currentUser.avatar : u.avatar,
+            };
+          }
+          return u;
+        });
+      });
     }
   }, [currentUser]);
 
@@ -191,6 +221,14 @@ export default function UsersPage() {
     }
 
     if (editingUser) {
+      const updatedUserObj = {
+        id: editingUser.id,
+        email: formEmail.trim(),
+        name: formName.trim(),
+        avatar: formAvatar || undefined,
+      };
+      savePersistentProfile(updatedUserObj);
+
       const updatedList = users.map(u => 
         u.id === editingUser.id 
           ? { 
@@ -224,6 +262,12 @@ export default function UsersPage() {
         status: 'Ativo',
         lastLogin: 'Nunca acessou'
       };
+      savePersistentProfile({
+        id: novo.id,
+        email: novo.email,
+        name: novo.name,
+        avatar: novo.avatar,
+      });
       setUsers([...users, novo]);
       toast.success('Novo usuário criado com sucesso!');
     }
