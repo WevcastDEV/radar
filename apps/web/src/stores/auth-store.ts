@@ -10,12 +10,37 @@ interface AuthState {
   checkAuth: () => void;
 }
 
+const getInitialUser = (): UserProfile | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const saved = localStorage.getItem('radar_user_profile');
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return null;
+};
+
 export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
+  user: getInitialUser(),
   isAuthenticated: false, // Will be updated on init or login
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
+  setUser: (user) => {
+    if (typeof window !== 'undefined') {
+      try {
+        if (user) {
+          localStorage.setItem('radar_user_profile', JSON.stringify(user));
+        } else {
+          localStorage.removeItem('radar_user_profile');
+        }
+      } catch {}
+    }
+    set({ user, isAuthenticated: !!user });
+  },
   logout: () => {
     clearTokens();
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('radar_user_profile');
+      } catch {}
+    }
     set({ user: null, isAuthenticated: false });
   },
   checkAuth: () => {

@@ -1,7 +1,7 @@
 import { IsString, IsOptional, IsEnum, IsNumber, IsBoolean, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
-import { LeadStatus, Priority } from '@prisma/client';
+import { LeadStatus, Priority } from '../../common/enums';
 
 export class CreateAddressDto {
   @IsOptional() @IsString() street?: string;

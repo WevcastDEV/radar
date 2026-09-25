@@ -1,4 +1,11 @@
 @echo off
-set DATABASE_URL=postgresql://radar:radar_secret_2024@localhost:5432/radar_db?schema=public
-set JWT_SECRET=radar-jwt-secret-change-in-production-2024
-call npm run start:dev
+title Radar de Oportunidades - API e Robo WhatsApp
+color 0A
+cd /d "%~dp0"
+echo ======================================================
+echo   RADAR DE OPORTUNIDADES - SERVIDOR API ^& WHATSAPP
+echo   Banco de Dados: SQLite Local (Zero Docker)
+echo ======================================================
+echo.
+node dist/main.js
+pause

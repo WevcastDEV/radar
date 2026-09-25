@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import Link from 'next/link';
 import { 
-  MessageSquare,
+  MessageSquare, GitBranch,
   Volume2, Bell, TrendingUp, Trophy, Flame, 
   Send, 
   Pause, 
@@ -25,6 +26,7 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
   ChevronRight,
   Trash2,
   Image as ImageIcon,
@@ -56,6 +58,8 @@ import {
 import { ImportMapsModal } from '@/components/leads/import-maps-modal';
 import { 
   useLeads, 
+  getStoredLeads,
+  saveStoredLeads,
   getDispatchedHistory, 
   syncDispatchedHistoryWithServer, 
   markLeadAsDispatched, 
@@ -67,10 +71,11 @@ import { BRAZIL_STATES, BRAZIL_REGIONS, getStateByUF, generateNationalSeedLeads 
 import { useAuthStore } from '@/stores/auth-store';
 import { LeadStatus } from '@radar/types';
 import toast from 'react-hot-toast';
-import { whatsappApi as axios } from './dispatch-safety-panel';
+import { safeWhatsAppClient as axios } from './whatsapp-client';
 import { DispatchSafetyPanel } from './dispatch-safety-panel';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { formatBrazilianPhone, toWhatsAppJidDigits, extractPhoneVariants } from '@/lib/phone-utils';
+import { getOrCreateDeviceId, getDeviceName, setDeviceName } from '@/lib/device-id';
 
 // Normalização e extração de variantes de números de telefone para proteção anti-reenvio
 const extractPhoneDigitsVariants = (raw: string): string[] => {
@@ -205,6 +210,10 @@ export default function WhatsAppBotPage() {
   const [unreadHotLeadsCount, setUnreadHotLeadsCount] = useState(0);
   const [isHotLeadsModalOpen, setIsHotLeadsModalOpen] = useState(false);
   const lastNotifiedReplyIdRef = useRef<string | null>(null);
+  const pendingCategoryScrollRef = useRef<HTMLDivElement>(null);
+  const historyCategoryScrollRef = useRef<HTMLDivElement>(null);
+  const [pendingCategorySearch, setPendingCategorySearch] = useState('');
+  const [historyCategorySearch, setHistoryCategorySearch] = useState('');
 
   // 📊 Métricas do Teste A/B de Modelos de Mensagem
   const [abAnalytics, setAbAnalytics] = useState<{
@@ -231,7 +240,12 @@ export default function WhatsAppBotPage() {
   });
   const [isSavingSdr, setIsSavingSdr] = useState(false);
 
-  // Status da conexão
+  // Status da conexão e isolamento por computador
+  const [deviceId, setDeviceId] = useState<string>('');
+  const [deviceName, setDeviceNameState] = useState<string>('');
+  const [isEditingDeviceName, setIsEditingDeviceName] = useState(false);
+  const [tempDeviceName, setTempDeviceName] = useState('');
+
   const [botStatus, setBotStatus] = useState<{
     connected: boolean;
     qrCode: string | null;
@@ -246,10 +260,32 @@ export default function WhatsAppBotPage() {
       isWarmupComplete: boolean;
       safetyGate: string | null;
     };
-  }>({ connected: false, qrCode: null, autoReplyEnabled: true, cordialityEnabled: true });
+  }>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('radar_whatsapp_bot_status_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.connected) {
+            return { connected: true, qrCode: null, autoReplyEnabled: true, cordialityEnabled: true };
+          }
+        }
+      } catch {}
+    }
+    return { connected: false, qrCode: null, autoReplyEnabled: true, cordialityEnabled: true };
+  });
   const [isCheckingBot, setIsCheckingBot] = useState(false);
   const [isTogglingAutoReply, setIsTogglingAutoReply] = useState(false);
   const [isTogglingCordiality, setIsTogglingCordiality] = useState(false);
+
+  const handleSaveDeviceName = () => {
+    if (tempDeviceName.trim()) {
+      setDeviceName(tempDeviceName.trim());
+      setDeviceNameState(tempDeviceName.trim());
+      setIsEditingDeviceName(false);
+      toast.success(`Nome da máquina salvo: ${tempDeviceName.trim()}`, { icon: '💻' });
+    }
+  };
 
   // Campos de personalização do remetente
   const [senderName, setSenderName] = useState(user?.name || 'Weverton');
@@ -296,6 +332,12 @@ export default function WhatsAppBotPage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [countdown, setCountdown] = useState(0);
   const [nextLeadInfo, setNextLeadInfo] = useState<{ name: string; phone: string; category?: string } | null>(null);
+  const [isSkippingCountdown, setIsSkippingCountdown] = useState(false);
+  const [queueLastError, setQueueLastError] = useState<string | null>(null);
+  const lastHandledDispatchTimeRef = useRef<number>(0);
+
+  // Aba da Fila de Leads: 'pending' (Pendentes para Disparo) ou 'dispatched' (Já Acionados)
+  const [queueTab, setQueueTab] = useState<'pending' | 'dispatched'>('pending');
 
   // Histórico de Acionados em Pastas
   const [history, setHistory] = useState<DispatchedLeadRecord[]>([]);
@@ -411,6 +453,14 @@ export default function WhatsAppBotPage() {
       console.error(e);
     }
 
+    try {
+      const id = getOrCreateDeviceId();
+      const name = getDeviceName();
+      setDeviceId(id);
+      setDeviceNameState(name);
+      setTempDeviceName(name);
+    } catch (e) {}
+
     // Carrega histórico local e sincroniza imediatamente com o servidor permanente
     setHistory(getDispatchedHistory());
     setIsSyncingHistory(true);
@@ -454,15 +504,39 @@ export default function WhatsAppBotPage() {
         if (q.isRunning) {
           wasRunningRef.current = true;
           setIsDispatching(true);
-          setIsPaused(q.isPaused);
-          setCurrentIndex(q.currentIndex);
-          setCountdown(q.countdown);
-          setIsBatchResting(q.isBatchResting);
-          setBatchRestCountdown(q.batchRestCountdown);
-          setCurrentBatchNum(q.currentBatch);
-          setTotalBatchesCount(q.totalBatches);
-          setSentInCurrentBatch(q.sentInBatch);
-          setNextLeadInfo(q.nextLead || null);
+          setIsPaused(Boolean(q.isPaused));
+          setCurrentIndex(Number(q.currentIndex) || 0);
+          setCountdown(Number(q.countdown) || 0);
+          setIsBatchResting(Boolean(q.isBatchResting));
+          setBatchRestCountdown(Number(q.batchRestCountdown) || 0);
+          setCurrentBatchNum(Number(q.currentBatch) || 1);
+          setTotalBatchesCount(Number(q.totalBatches) || 1);
+          setSentInCurrentBatch(Number(q.sentInBatch) || 0);
+          setNextLeadInfo(q.nextLead ? {
+            name: String(q.nextLead.name || ''),
+            phone: String(q.nextLead.phone || ''),
+            category: String(q.nextLead.category || ''),
+          } : null);
+
+          let safeErr = q.lastError || null;
+          if (safeErr && typeof safeErr !== 'string') {
+            safeErr = Array.isArray(safeErr) ? safeErr.join(', ') : JSON.stringify(safeErr);
+          }
+          setQueueLastError(safeErr);
+
+          // Rastreia e notifica sobre cada resultado de disparo
+          if (q.lastDispatchResult && q.lastDispatchResult.timestamp > lastHandledDispatchTimeRef.current) {
+            lastHandledDispatchTimeRef.current = q.lastDispatchResult.timestamp;
+            const leadName = String(q.lastDispatchResult.leadName || 'Cliente');
+            if (q.lastDispatchResult.success) {
+              toast.success(`✅ Disparo concluído: ${leadName}!`, { icon: '🚀' });
+            } else {
+              let failMsg = q.lastDispatchResult.message || 'Falha no envio';
+              if (Array.isArray(failMsg)) failMsg = failMsg.join(', ');
+              if (typeof failMsg !== 'string') failMsg = JSON.stringify(failMsg);
+              toast.error(`❌ Falha no disparo (${leadName}): ${failMsg}`, { duration: 6000 });
+            }
+          }
 
           // Quando o servidor avança no envio de um cliente, atualiza o histórico e os leads em tempo real
           if (q.currentIndex !== lastDispatchedIndexRef.current) {
@@ -563,13 +637,54 @@ export default function WhatsAppBotPage() {
   const checkBotStatus = async () => {
     setIsCheckingBot(true);
     try {
-      const res = await axios.get('/whatsapp/status', { timeout: 4000 });
-      const data = res.data?.data || res.data;
+      let data: any = null;
+
+      // 1. Consulta o proxy oficial /api/whatsapp/status
+      try {
+        const res = await axios.get('/whatsapp/status', { timeout: 4000 });
+        data = res.data?.data || res.data;
+      } catch (err) {
+        console.warn('Proxy /whatsapp/status falhou temporariamente:', err);
+      }
+
+      // 2. Se estiver na nuvem (Vercel) ou o proxy não tiver o robô ativo,
+      // tenta conectar diretamente no daemon local da máquina do usuário (http://127.0.0.1:3001)
+      if (typeof window !== 'undefined' && (!data || (!data.connected && !data.qrCode))) {
+        try {
+          const directRes = await fetch('http://127.0.0.1:3001/api/whatsapp/status', {
+            headers: { 'x-device-id': deviceId || getOrCreateDeviceId() },
+            signal: AbortSignal.timeout(2000),
+          });
+          if (directRes.ok) {
+            const directJson = await directRes.json();
+            if (directJson?.data) {
+              data = directJson.data;
+            }
+          }
+        } catch {
+          // Daemon local não em execução nesta porta
+        }
+      }
+
       if (data && typeof data.connected === 'boolean') {
-        setBotStatus(data);
+        if (data.connected) {
+          try {
+            localStorage.setItem('radar_whatsapp_bot_status_cache', JSON.stringify({ connected: true }));
+          } catch {}
+          setBotStatus(prev => ({ ...prev, ...data }));
+        } else if (data.qrCode) {
+          // Apenas se tiver um QR Code novo para ler consideramos desconectado
+          try {
+            localStorage.removeItem('radar_whatsapp_bot_status_cache');
+          } catch {}
+          setBotStatus(prev => ({ ...prev, ...data, connected: false }));
+        } else {
+          // Se não tiver QR code gerado, mantém o estado anterior para não piscar no F5
+          setBotStatus(prev => ({ ...prev, ...data, connected: prev.connected }));
+        }
       }
     } catch (e) {
-      setBotStatus({ connected: false, qrCode: null });
+      console.warn('Verificação de status temporariamente indisponível:', e);
     } finally {
       setIsCheckingBot(false);
     }
@@ -579,11 +694,25 @@ export default function WhatsAppBotPage() {
     setIsCheckingBot(true);
     try {
       setBotStatus(prev => ({ ...prev, connected: false, qrCode: null }));
-      await axios.post('/whatsapp/reconnect', { forceNewSession });
+      
+      // Envia requisição tanto pelo proxy quanto diretamente ao robô local
+      const p1 = axios.post('/whatsapp/reconnect', { forceNewSession }).catch(() => {});
+      const p2 = (typeof window !== 'undefined')
+        ? fetch('http://127.0.0.1:3001/api/whatsapp/reconnect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-device-id': deviceId || getOrCreateDeviceId() },
+            body: JSON.stringify({ forceNewSession }),
+            signal: AbortSignal.timeout(3000),
+          }).catch(() => {})
+        : Promise.resolve();
+
+      await Promise.race([Promise.all([p1, p2]), new Promise(r => setTimeout(r, 1500))]);
+      
       toast.success('Gerando novo QR Code... Aponte a câmera do celular!');
-      setTimeout(checkBotStatus, 1200);
-      setTimeout(checkBotStatus, 2500);
-      setTimeout(checkBotStatus, 4500);
+      setTimeout(checkBotStatus, 1000);
+      setTimeout(checkBotStatus, 2200);
+      setTimeout(checkBotStatus, 4000);
+      setTimeout(checkBotStatus, 6000);
     } catch (e) {
       toast.error('Não foi possível solicitar a reconexão.');
     } finally {
@@ -604,6 +733,9 @@ export default function WhatsAppBotPage() {
     if (confirmed) {
       setIsCheckingBot(true);
       try {
+        try {
+          localStorage.removeItem('radar_whatsapp_bot_status_cache');
+        } catch {}
         setBotStatus(prev => ({ ...prev, connected: false, qrCode: null }));
         await axios.post('/whatsapp/disconnect');
         toast.success('WhatsApp desconectado. A conexão só será iniciada novamente quando você solicitar.');
@@ -650,10 +782,6 @@ export default function WhatsAppBotPage() {
             `🔥 Lead Quente: ${latestUnread.leadName || latestUnread.phone}`,
             `Respondeu: "${latestUnread.text}" (${latestUnread.templateName})`
           );
-          toast.success(`🔥 Lead Quente! ${latestUnread.leadName || latestUnread.phone} respondeu ao robô!`, {
-            duration: 9000,
-            icon: '🔥'
-          });
         }
       }
     } catch (e) {}
@@ -1011,7 +1139,28 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
 
   // Conjunto de IDs de leads já acionados
   const dispatchedLeadIds = useMemo(() => {
-    return new Set(history.filter(h => h.status === 'SENT').map(h => h.leadId));
+    return new Set(history.map(h => h.leadId).filter(Boolean));
+  }, [history]);
+
+  // Conjunto de dígitos normalizados de telefones já acionados no histórico
+  const dispatchedPhonesSet = useMemo(() => {
+    const set = new Set<string>();
+    history.forEach(h => {
+      if (h.phone) {
+        const variants = extractPhoneDigitsVariants(h.phone);
+        variants.forEach(v => set.add(v));
+      }
+    });
+    return set;
+  }, [history]);
+
+  // Conjunto de nomes de leads já acionados no histórico
+  const dispatchedNamesSet = useMemo(() => {
+    const set = new Set<string>();
+    history.forEach(h => {
+      if (h.leadName) set.add(h.leadName.trim().toLowerCase());
+    });
+    return set;
   }, [history]);
 
   // Conjunto de dígitos normalizados de todos os clientes já atendidos, contatados ou em negociação
@@ -1024,9 +1173,9 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
       variants.forEach(v => set.add(v));
     });
 
-    // 2. Telefones que constam no histórico de disparos como SENT
+    // 2. Telefones que constam no histórico de disparos
     history.forEach(h => {
-      if (h.phone && h.status === 'SENT') {
+      if (h.phone) {
         const variants = extractPhoneDigitsVariants(h.phone);
         variants.forEach(v => set.add(v));
       }
@@ -1053,16 +1202,24 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
       const phone = (lead as any).phone || (lead as any).contacts?.[0]?.value;
       if (!phone) return false;
 
-      // Se já foi acionado por ID no histórico
+      // 📵 Isolamento de clientes sem WhatsApp ou com telefone fixo (ex: 92984322275)
+      if ((lead as any).hasWhatsApp === false || (lead as any).noWhatsApp === true || (lead as any).whatsappStatus === 'NO_WHATSAPP') {
+        return false;
+      }
+      const cleanDigits = phone.replace(/\D/g, '');
+      if (cleanDigits.includes('984322275') || cleanDigits.includes('84322275')) {
+        return false;
+      }
+
+      // 🛡️ Proteção Anti-Reenvio: se o lead já foi acionado por ID, por nome ou por telefone
       if (dispatchedLeadIds.has(lead.id)) return false;
+      if (dispatchedNamesSet.has(lead.name.trim().toLowerCase())) return false;
+
+      const variants = extractPhoneDigitsVariants(phone);
+      if (variants.some(v => dispatchedPhonesSet.has(v) || attendedPhoneDigitsSet.has(v))) return false;
 
       // 🛡️ Proteção Anti-Reenvio: se o CRM já indica que o lead foi contatado/atendido
       if (lead.status && lead.status !== LeadStatus.NEW) return false;
-
-      // 🛡️ Proteção Anti-Reenvio: se o telefone ou alguma variação dele já foi atendido/disparado
-      const variants = extractPhoneDigitsVariants(phone);
-      const isAlreadyAttended = variants.some(v => attendedPhoneDigitsSet.has(v));
-      if (isAlreadyAttended) return false;
       
       const sub = (lead as any).subcategory || lead.segment?.name || 'Geral';
       if (categoryFilter !== 'Todas' && sub !== categoryFilter) return false;
@@ -1084,14 +1241,140 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
 
       return true;
     });
-  }, [allLeads, dispatchedLeadIds, attendedPhoneDigitsSet, categoryFilter, searchQuery, stateFilter]);
+  }, [allLeads, dispatchedLeadIds, dispatchedPhonesSet, dispatchedNamesSet, attendedPhoneDigitsSet, categoryFilter, searchQuery, stateFilter]);
 
-  // Todos os clientes que possuem telefone verificado no cadastro
+  // Lista de clientes que JÁ FORAM ACIONADOS / CONTATADOS (colocados em área dedicada)
+  const alreadyContactedLeads = useMemo(() => {
+    const list: any[] = [];
+    const seenKeys = new Set<string>();
+
+    // 1. Leads de allLeads identificados como já acionados
+    (allLeads || []).forEach((lead: any) => {
+      const phone = lead.phone || lead.contacts?.[0]?.value || '';
+      const variants = phone ? extractPhoneDigitsVariants(phone) : [];
+      const isDispatched = dispatchedLeadIds.has(lead.id) ||
+        dispatchedNamesSet.has(lead.name.trim().toLowerCase()) ||
+        variants.some(v => dispatchedPhonesSet.has(v) || attendedPhoneDigitsSet.has(v)) ||
+        (lead.status && lead.status !== LeadStatus.NEW);
+
+      if (isDispatched) {
+        const key = phone ? phone.replace(/\D/g, '') : lead.name.toLowerCase();
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          if (variants.length) variants.forEach(v => seenKeys.add(v));
+
+          const hist = history.find(h => 
+            (h.leadId && h.leadId === lead.id) || 
+            (h.phone && variants.some(v => extractPhoneDigitsVariants(h.phone).includes(v))) || 
+            (h.leadName && h.leadName.trim().toLowerCase() === lead.name.trim().toLowerCase())
+          );
+
+          list.push({
+            id: lead.id,
+            name: lead.name,
+            phone: phone || hist?.phone || '',
+            subcategory: lead.subcategory || lead.segment?.name || hist?.category || 'Geral',
+            address: lead.address || { city: 'Manaus', state: 'AM' },
+            dispatchedAt: hist ? `${hist.date} às ${hist.time}` : 'Acionado anteriormente',
+            dispatchedMessage: hist?.messageSent || 'Mensagem enviada via WhatsApp',
+            dispatchedStatus: hist?.status || 'SENT',
+            templateName: hist?.templateName || 'Modelo Padrão',
+          });
+        }
+      }
+    });
+
+    // 2. Registros do histórico do servidor que possam não estar na lista local
+    history.forEach(h => {
+      const clean = (h.phone || '').replace(/\D/g, '');
+      const key = clean || (h.leadName ? h.leadName.toLowerCase() : '');
+      if (key && !seenKeys.has(key)) {
+        seenKeys.add(key);
+        list.push({
+          id: h.leadId || `hist-${clean}`,
+          name: h.leadName || 'Cliente Acionado',
+          phone: h.phone,
+          subcategory: h.category || 'Geral',
+          address: { city: 'Manaus', state: 'AM' },
+          dispatchedAt: `${h.date} às ${h.time}`,
+          dispatchedMessage: h.messageSent,
+          dispatchedStatus: h.status,
+          templateName: h.templateName,
+        });
+      }
+    });
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      return list.filter(l => 
+        l.name.toLowerCase().includes(q) || 
+        l.phone.includes(q) || 
+        (l.subcategory && l.subcategory.toLowerCase().includes(q))
+      );
+    }
+
+    return list;
+  }, [allLeads, history, dispatchedLeadIds, dispatchedPhonesSet, dispatchedNamesSet, attendedPhoneDigitsSet, searchQuery]);
+
+  // Função para reativar cliente já acionado e recolocá-lo na fila de pendentes
+  const handleReactivateLead = async (lead: any) => {
+    try {
+      const phone = lead.phone;
+      if (phone) {
+        await axios.post('/whatsapp/attended-phones/unlock', { phone });
+      }
+      
+      const cleanDigits = (phone || '').replace(/\D/g, '');
+      setHistory(prev => prev.filter(h => {
+        if (h.leadId && h.leadId === lead.id) return false;
+        if (phone && h.phone && h.phone.replace(/\D/g, '') === cleanDigits) return false;
+        if (h.leadName && h.leadName.trim().toLowerCase() === lead.name.trim().toLowerCase()) return false;
+        return true;
+      }));
+
+      const stored = getStoredLeads();
+      const updated = stored.map(l => {
+        const itemPhone = ((l as any).phone || (l as any).phones?.[0]?.number || '').replace(/\D/g, '');
+        if (l.id === lead.id || (cleanDigits && itemPhone === cleanDigits)) {
+          return { ...l, status: LeadStatus.NEW };
+        }
+        return l;
+      });
+      saveStoredLeads(updated);
+
+      refetchLeads();
+      fetchAttendedPhones();
+      toast.success(`"${lead.name}" reativado! Movido de volta para a fila de pendentes.`);
+    } catch (e) {
+      toast.error('Erro ao reativar cliente.');
+    }
+  };
+
+  // Garante que selectedLeadIds só contenha clientes da fila de pendentes (nunca clientes já acionados)
+  useEffect(() => {
+    const availableIdSet = new Set(availableQueueLeads.map(l => l.id));
+    setSelectedLeadIds(prev => {
+      const filtered = prev.filter(id => availableIdSet.has(id));
+      if (filtered.length !== prev.length) {
+        try {
+          localStorage.setItem(SELECTED_LEADS_STORAGE_KEY, JSON.stringify(filtered));
+        } catch {}
+        return filtered;
+      }
+      return prev;
+    });
+  }, [availableQueueLeads]);
+
+  // Todos os clientes que possuem telefone verificado no cadastro com WhatsApp ativo
   const allLeadsWithPhone = useMemo(() => {
     if (!allLeads) return [];
     return allLeads.filter((l: any) => {
       const phone = l.phone || l.contacts?.[0]?.value;
-      return !!phone;
+      if (!phone) return false;
+      if (l.hasWhatsApp === false || l.noWhatsApp === true || l.whatsappStatus === 'NO_WHATSAPP') return false;
+      const cleanDigits = phone.replace(/\D/g, '');
+      if (cleanDigits.includes('984322275') || cleanDigits.includes('84322275')) return false;
+      return true;
     });
   }, [allLeads]);
 
@@ -1101,7 +1384,18 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
     if (allLeads) {
       allLeads.forEach((l: any) => {
         const phone = l.phone || l.contacts?.[0]?.value;
-        if (!phone || dispatchedLeadIds.has(l.id)) return;
+        if (!phone) return;
+        if (l.hasWhatsApp === false || l.noWhatsApp === true || l.whatsappStatus === 'NO_WHATSAPP') return;
+        const cleanDigits = phone.replace(/\D/g, '');
+        if (cleanDigits.includes('984322275') || cleanDigits.includes('84322275')) return;
+
+        // Se já foi acionado
+        if (dispatchedLeadIds.has(l.id)) return;
+        if (dispatchedNamesSet.has(l.name.trim().toLowerCase())) return;
+        const variants = extractPhoneDigitsVariants(phone);
+        if (variants.some(v => dispatchedPhonesSet.has(v) || attendedPhoneDigitsSet.has(v))) return;
+        if (l.status && l.status !== LeadStatus.NEW) return;
+
         totalEligible++;
         const sub = l.subcategory || l.segment?.name || 'Geral';
         counts[sub] = (counts[sub] || 0) + 1;
@@ -1125,10 +1419,10 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
     ];
 
     return tabs;
-  }, [allLeads, dispatchedLeadIds]);
+  }, [allLeads, dispatchedLeadIds, dispatchedPhonesSet, dispatchedNamesSet, attendedPhoneDigitsSet]);
 
   const handleSelectAll = () => {
-    if (selectedLeadIds.length === availableQueueLeads.length) {
+    if (selectedLeadIds.length === availableQueueLeads.length && availableQueueLeads.length > 0) {
       updateSelectedLeadIds([]);
     } else {
       updateSelectedLeadIds(availableQueueLeads.map(l => l.id));
@@ -1144,17 +1438,18 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
   };
 
   // Substituição dinâmica com formatação em Negrito
-  const compileMessage = (templateText: string, lead: any): string => {
-    const clientName = lead.name;
-    const segment = (lead as any).subcategory || lead.segment?.name || 'Comércio';
-    const city = lead.address?.city || 'sua cidade';
-    const state = lead.address?.state || 'Brasil';
-    const neighborhood = lead.address?.neighborhood || '';
+  const compileMessage = (templateText: string = '', lead: any = {}): string => {
+    if (!templateText || typeof templateText !== 'string') return '';
+    const clientName = lead?.name || 'Cliente';
+    const segment = (lead as any)?.subcategory || lead?.segment?.name || 'Comércio';
+    const city = lead?.address?.city || 'sua cidade';
+    const state = lead?.address?.state || 'Brasil';
+    const neighborhood = lead?.address?.neighborhood || '';
     
     return templateText
       .replace(/\*?\{\{nome_cliente\}\}\*?/g, `*${clientName}*`)
-      .replace(/\*?\{\{meu_nome\}\}\*?/g, `*${senderName.trim()}*`)
-      .replace(/\*?\{\{minha_empresa\}\}\*?/g, `*${companyName.trim()}*`)
+      .replace(/\*?\{\{meu_nome\}\}\*?/g, `*${(senderName || '').trim()}*`)
+      .replace(/\*?\{\{minha_empresa\}\}\*?/g, `*${(companyName || '').trim()}*`)
       .replace(/\*?\{\{segmento\}\}\*?/g, `*${segment}*`)
       .replace(/\*?\{\{cidade\}\}\*?/g, `*${city}*`)
       .replace(/\*?\{\{estado\}\}\*?/g, `*${state}*`)
@@ -1216,6 +1511,17 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
         sendSuccess = true;
       } else {
         failureReason = resData?.message || 'Falha no envio';
+        if (resData?.hasWhatsApp === false || resData?.isLandline === true) {
+          try {
+            const rawLeads = localStorage.getItem('radar_leads_data') || localStorage.getItem('radar_leads');
+            if (rawLeads) {
+              const parsed = JSON.parse(rawLeads);
+              const updated = parsed.map((l: any) => l.id === lead.id ? { ...l, hasWhatsApp: false, noWhatsApp: true, isLandline: true, whatsappStatus: 'NO_WHATSAPP' } : l);
+              localStorage.setItem('radar_leads_data', JSON.stringify(updated));
+              localStorage.setItem('radar_leads', JSON.stringify(updated));
+            }
+          } catch (e) {}
+        }
       }
     } catch (e: any) {
       failureReason = e?.response?.data?.message || e?.message || 'Erro de comunicação com o robô';
@@ -1266,9 +1572,60 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
     return record;
   };
 
-  const formatTimeMinutesSeconds = (totalSeconds: number) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
+  const handleOpenDirectWhatsApp = (lead: any) => {
+    const rawPhone = (lead as any).phone || (lead as any).contacts?.[0]?.value || '';
+    const leadUF = lead.address?.state;
+    const stObj = leadUF ? getStateByUF(leadUF) : null;
+    const defaultDDD = stObj?.ddds?.[0] || '92';
+
+    const fullPhone = toWhatsAppJidDigits(rawPhone, defaultDDD);
+    const displayPhone = formatBrazilianPhone(rawPhone, defaultDDD);
+    const currentTemplate = templates[selectedTemplateIndex] || templates[0];
+    const formattedMessage = compileMessage(currentTemplate.text, lead);
+
+    // Abre diretamente no WhatsApp Web ou Desktop com a mensagem preenchida
+    const webUrl = `https://web.whatsapp.com/send?phone=${fullPhone}&text=${encodeURIComponent(formattedMessage)}`;
+    window.open(webUrl, '_blank', 'noopener,noreferrer');
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('pt-BR');
+    const timeStr = now.toLocaleTimeString('pt-BR');
+    const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const dateLabel = `${now.getDate()} de ${meses[now.getMonth()]} de ${now.getFullYear()}`;
+
+    const record: DispatchedLeadRecord = {
+      leadId: lead.id,
+      leadName: lead.name,
+      phone: displayPhone,
+      category: (lead as any).subcategory || lead.segment?.name || 'Geral',
+      date: dateStr,
+      dateLabel,
+      time: timeStr,
+      messageSent: formattedMessage,
+      templateName: `${currentTemplate.name} (Modo Direto Web)`,
+      status: 'SENT',
+      hasImage: false,
+    };
+
+    markLeadAsDispatched(record);
+    setSelectedLeadIds(prev => {
+      const updated = prev.filter(id => id !== lead.id);
+      try {
+        localStorage.setItem(SELECTED_LEADS_STORAGE_KEY, JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    setHistory(prev => [record, ...prev]);
+    refetchLeads();
+    toast.success(`⚡ WhatsApp Web aberto para ${lead.name}! Enviando direto da sua máquina sem precisar de robô.`, { icon: '💬', duration: 5000 });
+  };
+
+  const formatTimeMinutesSeconds = (totalSeconds: any) => {
+    const s = Number(totalSeconds);
+    if (!Number.isFinite(s) || s < 0) return '00:00';
+    const mins = Math.floor(s / 60);
+    const secs = Math.floor(s % 60);
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -1278,6 +1635,30 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
       toast.success('Descanso do lote adiantado! Iniciando próximo ciclo no servidor agora...');
     } catch (e) {
       toast.error('Não foi possível adiantar o descanso do lote.');
+    }
+  };
+
+  const handleSkipCountdown = async () => {
+    if (!botStatus.connected) {
+      toast.error('⚠️ WhatsApp não está conectado! Conecte seu aparelho escaneando o QR Code no topo da página antes de disparar.', {
+        duration: 6000,
+        icon: '📱'
+      });
+      return;
+    }
+
+    setIsSkippingCountdown(true);
+    setCountdown(0);
+    try {
+      const res = await axios.post('/whatsapp/queue/skip-countdown');
+      if (res.data?.success) {
+        toast.success('⚡ Disparo imediato acionado! Enviando mensagem agora...', { icon: '⚡' });
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || 'Não foi possível adiantar o disparo.';
+      toast.error(msg);
+    } finally {
+      setIsSkippingCountdown(false);
     }
   };
 
@@ -1304,68 +1685,81 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
   };
 
   const handleStartDispatch = async () => {
-    let leadsToProcess: any[] = [];
-
-    if (selectedLeadIds.length > 0) {
-      // 1. O usuário selecionou clientes específicos na tabela: filtra para garantir que nenhum já atendido seja enviado por engano
-      const selected = (allLeads || []).filter(l => {
-        const phone = (l as any).phone || (l as any).contacts?.[0]?.value;
-        return selectedLeadIds.includes(l.id) && phone;
-      });
-
-      const safeLeads = selected.filter(lead => {
-        const phone = (lead as any).phone || (lead as any).contacts?.[0]?.value || '';
-        const variants = extractPhoneDigitsVariants(phone);
-        const isAttended = variants.some(v => attendedPhoneDigitsSet.has(v)) || dispatchedLeadIds.has(lead.id) || (lead.status && lead.status !== LeadStatus.NEW);
-        return !isAttended;
-      });
-
-      if (safeLeads.length < selected.length) {
-        const blockedCount = selected.length - safeLeads.length;
-        toast(`🛡️ Proteção Anti-Reenvio: ${blockedCount} cliente(s) selecionado(s) já haviam sido atendidos e foram preservados.`, { icon: '🛡️' });
+    try {
+      if (!botStatus.connected) {
+        toast.error('⚠️ WhatsApp não está conectado! Conecte seu aparelho escaneando o QR Code no topo da página antes de iniciar os disparos.', {
+          duration: 7000,
+          icon: '📱'
+        });
+        return;
       }
 
-      leadsToProcess = safeLeads;
-    } else if (availableQueueLeads.length > 0) {
-      // 2. Não selecionou manualmente, envia para os clientes da fila que ainda não foram acionados nem atendidos
-      leadsToProcess = availableQueueLeads;
-    }
+      let leadsToProcess: any[] = [];
 
-    if (leadsToProcess.length === 0) {
-      toast.error('🛡️ Nenhum cliente pendente para envio. Todos os clientes selecionados ou da fila já foram atendidos ou contatados!');
-      return;
-    }
+      if (selectedLeadIds.length > 0) {
+        // 1. O usuário selecionou clientes específicos na tabela: filtra para garantir que nenhum já atendido seja enviado por engano
+        const selected = (allLeads || []).filter(l => {
+          const phone = (l as any).phone || (l as any).contacts?.[0]?.value;
+          return selectedLeadIds.includes(l.id) && phone;
+        });
 
-    const effectiveBatchSize = useBatchMode ? Math.max(1, batchSize) : leadsToProcess.length;
-    const totalBatches = Math.ceil(leadsToProcess.length / effectiveBatchSize);
+        const safeLeads = selected.filter(lead => {
+          const phone = (lead as any).phone || (lead as any).contacts?.[0]?.value || '';
+          if ((lead as any).hasWhatsApp === false || (lead as any).noWhatsApp === true || (lead as any).whatsappStatus === 'NO_WHATSAPP') return false;
+          const cleanDigits = phone.replace(/\D/g, '');
+          if (cleanDigits.includes('984322275') || cleanDigits.includes('84322275')) return false;
 
-    setTotalBatchesCount(totalBatches);
-    setCurrentBatchNum(1);
-    setSentInCurrentBatch(0);
+          const variants = extractPhoneDigitsVariants(phone);
+          const isAttended = variants.some(v => attendedPhoneDigitsSet.has(v)) || dispatchedLeadIds.has(lead.id) || (lead.status && lead.status !== LeadStatus.NEW);
+          return !isAttended;
+        });
 
-    const payloadLeads = leadsToProcess.map((lead, i) => {
-      const templateIdx = rotateTemplates ? (i % templates.length) : selectedTemplateIndex;
-      const currentTemplate = templates[templateIdx];
-      const rawPhone = (lead as any).phone || (lead as any).contacts?.[0]?.value || '';
-      const leadUF = lead.address?.state;
-      const stObj = leadUF ? getStateByUF(leadUF) : null;
-      const defaultDDD = stObj?.ddds?.[0] || '92';
+        if (safeLeads.length < selected.length) {
+          const blockedCount = selected.length - safeLeads.length;
+          toast(`🛡️ Proteção Anti-Reenvio: ${blockedCount} cliente(s) selecionado(s) já haviam sido atendidos e foram preservados.`, { icon: '🛡️' });
+        }
 
-      const fullPhone = toWhatsAppJidDigits(rawPhone, defaultDDD);
-      const displayPhone = formatBrazilianPhone(rawPhone, defaultDDD);
-      const formattedMessage = compileMessage(currentTemplate.text, lead);
-      return {
-        id: lead.id,
-        name: lead.name,
-        phone: fullPhone,
-        phoneFormatted: displayPhone,
-        category: (lead as any).subcategory || lead.segment?.name || 'Geral',
-        templateName: currentTemplate.name,
-        message: formattedMessage,
-      };
-    });
+        leadsToProcess = safeLeads;
+      } else if (availableQueueLeads.length > 0) {
+        // 2. Não selecionou manualmente, envia para os clientes da fila que ainda não foram acionados nem atendidos
+        leadsToProcess = availableQueueLeads;
+      }
 
-    try {
+      if (leadsToProcess.length === 0) {
+        toast.error('🛡️ Nenhum cliente pendente para envio. Todos os clientes selecionados ou da fila já foram atendidos ou contatados!');
+        return;
+      }
+
+      const effectiveBatchSize = useBatchMode ? Math.max(1, batchSize) : leadsToProcess.length;
+      const totalBatches = Math.ceil(leadsToProcess.length / effectiveBatchSize);
+
+      setTotalBatchesCount(totalBatches);
+      setCurrentBatchNum(1);
+      setSentInCurrentBatch(0);
+
+      const tpls = templates && templates.length > 0 ? templates : DEFAULT_MESSAGE_TEMPLATES;
+      const payloadLeads = leadsToProcess.map((lead, i) => {
+        const templateIdx = rotateTemplates ? (i % (tpls.length || 1)) : selectedTemplateIndex;
+        const currentTemplate = tpls[templateIdx] || tpls[0] || { text: 'Olá {{nome_cliente}}', name: 'Padrão' };
+        const rawPhone = (lead as any).phone || (lead as any).contacts?.[0]?.value || '';
+        const leadUF = lead.address?.state;
+        const stObj = leadUF ? getStateByUF(leadUF) : null;
+        const defaultDDD = stObj?.ddds?.[0] || '92';
+
+        const fullPhone = toWhatsAppJidDigits(rawPhone, defaultDDD);
+        const displayPhone = formatBrazilianPhone(rawPhone, defaultDDD);
+        const formattedMessage = compileMessage(currentTemplate?.text || '', lead);
+        return {
+          id: lead.id,
+          name: lead.name || 'Cliente',
+          phone: fullPhone,
+          phoneFormatted: displayPhone,
+          category: (lead as any).subcategory || lead.segment?.name || 'Geral',
+          templateName: currentTemplate?.name || 'Padrão',
+          message: formattedMessage,
+        };
+      });
+
       const mediaNotice = attachedImage ? 'com Imagem Promocional' : 'em modo Texto';
       const batchNotice = useBatchMode ? ` [Em lotes de ${effectiveBatchSize} com pausa de ${batchPauseMinutes}min]` : '';
 
@@ -1383,18 +1777,24 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
       setIsBatchResting(false);
       setBatchRestCountdown(0);
       if (q) {
-        setCurrentIndex(q.currentIndex || 0);
-        setCurrentBatchNum(q.currentBatch || 1);
-        setTotalBatchesCount(q.totalBatches || totalBatches);
-        setSentInCurrentBatch(q.sentInBatch || 0);
-        setCountdown(q.countdown || 0);
-        setNextLeadInfo(q.nextLead || null);
+        setCurrentIndex(Number(q.currentIndex) || 0);
+        setCurrentBatchNum(Number(q.currentBatch) || 1);
+        setTotalBatchesCount(Number(q.totalBatches) || totalBatches);
+        setSentInCurrentBatch(Number(q.sentInBatch) || 0);
+        setCountdown(Number(q.countdown) || 0);
+        setNextLeadInfo(q.nextLead ? {
+          name: String(q.nextLead.name || ''),
+          phone: String(q.nextLead.phone || ''),
+          category: String(q.nextLead.category || ''),
+        } : null);
       }
 
       toast.success(`Disparos iniciados no servidor ${mediaNotice}${batchNotice} para ${leadsToProcess.length} clientes! Você já pode trocar de aba ou minimizar.`);
     } catch (e: any) {
       console.error('Erro ao iniciar disparos:', e);
-      const msg = e?.response?.data?.message || e?.response?.data?.error || e?.message || 'Erro ao iniciar fila de disparos no servidor';
+      let msg = e?.response?.data?.message || e?.response?.data?.error || e?.message || 'Erro ao iniciar fila de disparos no servidor';
+      if (Array.isArray(msg)) msg = msg.join(', ');
+      if (typeof msg !== 'string') msg = JSON.stringify(msg);
       toast.error(msg);
     }
   };
@@ -1404,8 +1804,10 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
       await axios.post('/whatsapp/queue/pause');
       setIsPaused(true);
       toast('Disparos pausados no servidor. Clique em "Continuar" para retomar.', { icon: '⏸️' });
-    } catch (e) {
-      toast.error('Erro ao pausar disparos no servidor.');
+    } catch (e: any) {
+      let msg = e?.response?.data?.message || e?.message || 'Erro ao pausar disparos no servidor.';
+      if (typeof msg !== 'string') msg = JSON.stringify(msg);
+      toast.error(msg);
     }
   };
 
@@ -1414,8 +1816,10 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
       await axios.post('/whatsapp/queue/resume');
       setIsPaused(false);
       toast.success('Retomando fila de disparos no servidor!');
-    } catch (e) {
-      toast.error('Erro ao retomar disparos no servidor.');
+    } catch (e: any) {
+      let msg = e?.response?.data?.message || e?.message || 'Erro ao retomar disparos no servidor.';
+      if (typeof msg !== 'string') msg = JSON.stringify(msg);
+      toast.error(msg);
     }
   };
 
@@ -1435,8 +1839,10 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
         setHistory(synced);
         refetchLeads();
       });
-    } catch (e) {
-      toast.error('Erro ao cancelar disparos no servidor.');
+    } catch (e: any) {
+      let msg = e?.response?.data?.message || e?.message || 'Erro ao cancelar disparos no servidor.';
+      if (typeof msg !== 'string') msg = JSON.stringify(msg);
+      toast.error(msg);
     }
   };
 
@@ -1597,6 +2003,19 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* Botão de Fluxos de Conversação */}
+          <Link href="/flows">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 px-3 text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
+              title="Configurar fluxo interativo de perguntas, opções e respostas para o robô"
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              🌿 Fluxos de Conversa
+            </Button>
+          </Link>
+
           {/* Botão de Ligar / Desligar Respostas Automáticas */}
           <Button
             onClick={handleToggleAutoReply}
@@ -1669,6 +2088,43 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
             </span>
           </Button>
 
+          {/* Identificação de Computador & Conexão Isolada */}
+          <div className="flex items-center gap-1.5 bg-card/80 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-border text-xs h-9">
+            <HardDrive className="w-3.5 h-3.5 text-primary shrink-0" />
+            {isEditingDeviceName ? (
+              <div className="flex items-center gap-1">
+                <Input
+                  value={tempDeviceName}
+                  onChange={(e) => setTempDeviceName(e.target.value)}
+                  className="h-6 w-28 text-[11px] px-1.5 py-0"
+                  placeholder="Nome do PC"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveDeviceName(); }}
+                />
+                <Button size="sm" variant="ghost" onClick={handleSaveDeviceName} className="h-6 w-6 p-0 text-emerald-400">
+                  <Check className="w-3 h-3" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-foreground truncate max-w-[130px] sm:max-w-[170px]" title={`Identificador do PC: ${deviceId}`}>
+                  {deviceName || 'Este Computador'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setTempDeviceName(deviceName); setIsEditingDeviceName(true); }}
+                  className="text-muted-foreground hover:text-foreground text-[10px]"
+                  title="Renomear este computador"
+                >
+                  <Edit3 className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            )}
+            <span className="text-[9px] px-1.5 py-0.2 rounded bg-primary/10 text-primary border border-primary/20 shrink-0 font-medium hidden sm:inline" title="Cada computador possui sua própria sessão de WhatsApp separada e não derruba outros computadores">
+              Sessão Exclusiva
+            </span>
+          </div>
+
           <div className="flex items-center gap-2 bg-card/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-border text-xs h-9">
             <span className={`w-2.5 h-2.5 rounded-full ${botStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
             <span className="font-medium">
@@ -1702,10 +2158,21 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                 <AlertCircle className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-amber-300">Robô do WhatsApp Desconectado</h3>
-                <p className="text-xs text-muted-foreground mt-0.5 max-w-xl">
-                  Para que as mensagens sejam entregues automaticamente no WhatsApp dos clientes, seu aparelho precisa estar pareado. Aponte a câmera ou clique para gerar um novo QR Code.
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-amber-300">Robô do WhatsApp Desconectado neste PC</h3>
+                  <Badge variant="outline" className="text-[10px] bg-amber-500/20 text-amber-200 border-amber-500/40">
+                    💻 {deviceName || 'Este Computador'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 max-w-xl">
+                  <strong>Conexão individual e segura:</strong> Conectar o WhatsApp deste computador <u>não desconecta</u> nem interfere nos outros computadores da sua equipe, mesmo usando o mesmo usuário!
                 </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-amber-200/90 bg-amber-500/15 p-2 rounded-lg border border-amber-500/20 max-w-xl">
+                  <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Prefere não escanear QR Code?</strong> Use o botão <strong>⚡ WhatsApp Web</strong> em qualquer lead abaixo para abrir a conversa já pronta direto no seu navegador.
+                  </span>
+                </div>
                 {botStatus.qrCode ? (
                   <div className="mt-3 p-3 bg-white rounded-xl inline-block shadow-lg border border-border">
                     <img 
@@ -1715,15 +2182,21 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                     />
                     <div className="flex items-center justify-center gap-1.5 mt-2 text-[11px] text-zinc-700 font-semibold">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                      Aponte a câmera do WhatsApp agora
+                      Aponte a câmera do WhatsApp deste aparelho agora
                     </div>
                   </div>
                 ) : (
                   <div className="mt-3 p-4 bg-amber-500/15 border border-amber-500/30 rounded-xl flex items-center gap-3 text-xs text-amber-300">
-                    <RefreshCw className="w-5 h-5 shrink-0 text-amber-400" />
+                    <RefreshCw className={`w-5 h-5 shrink-0 text-amber-400 ${isCheckingBot ? 'animate-spin' : ''}`} />
                     <div>
-                      <p className="font-semibold text-foreground">Nenhum QR Code disponível</p>
-                      <p className="text-muted-foreground text-[11px]">Clique em Gerar Novo QR Code para iniciar o pareamento.</p>
+                      <p className="font-semibold text-foreground">
+                        {isCheckingBot ? 'Gerando QR Code individual para este PC...' : 'QR Code aguardando sincronização'}
+                      </p>
+                      <p className="text-muted-foreground text-[11px]">
+                        {isCheckingBot 
+                          ? 'O robô Baileys está se comunicando com o WhatsApp. O QR Code aparecerá aqui em instantes...' 
+                          : 'Clique em "Gerar Novo QR Code" ao lado ou confirme se o INICIAR_RADAR.exe está ativo neste PC.'}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -1928,8 +2401,8 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                   {nextLeadInfo && (
                     <div className="mt-2 flex items-center gap-2 text-xs text-amber-200">
                       <span className="font-semibold">Primeiro do próximo lote:</span>
-                      <strong className="underline">{nextLeadInfo.name}</strong>
-                      <span className="font-mono text-[11px] opacity-80">({nextLeadInfo.phone})</span>
+                      <strong className="underline">{String(nextLeadInfo?.name || '')}</strong>
+                      <span className="font-mono text-[11px] opacity-80">({String(nextLeadInfo?.phone || '')})</span>
                     </div>
                   )}
                 </div>
@@ -1965,7 +2438,7 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                     ? 'Disparos Pausados' 
                     : isBatchResting 
                       ? `Lote ${currentBatchNum} de ${totalBatchesCount} em Descanso`
-                      : `Disparando Mensagens (${currentIndex} de ${selectedLeadIds.length + currentIndex})`}
+                      : `Disparando Mensagens (${currentIndex} de ${selectedLeadIds.length > 0 ? selectedLeadIds.length : (availableQueueLeads.length || currentIndex || 1)})`}
                 </h4>
                 {useBatchMode && (
                   <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 text-[10px] font-semibold">
@@ -1974,12 +2447,38 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                 )}
               </div>
               
-              <div className="flex items-center gap-2 text-xs">
-                {countdown > 0 && !isPaused && !isBatchResting && (
-                  <span className="font-mono bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-md border border-emerald-500/30 font-bold flex items-center gap-1.5">
-                    <Clock className="w-3 h-3 text-emerald-400" />
-                    Próximo envio em: {formatTimeMinutesSeconds(countdown)}
-                  </span>
+              <div className="flex items-center gap-2 text-xs flex-wrap">
+                {!isPaused && !isBatchResting && (
+                  countdown > 0 ? (
+                    <>
+                      <span className="font-mono bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-md border border-emerald-500/30 font-bold flex items-center gap-1.5">
+                        <Clock className="w-3 h-3 text-emerald-400" />
+                        Próximo envio em: {formatTimeMinutesSeconds(countdown)}
+                      </span>
+                      <Button 
+                        size="sm" 
+                        onClick={handleSkipCountdown} 
+                        disabled={isSkippingCountdown}
+                        className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm gap-1"
+                        title="Pular espera e disparar para o próximo cliente agora"
+                      >
+                        {isSkippingCountdown ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" /> Disparando...
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="w-3 h-3" /> Disparar Agora
+                          </>
+                        )}
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="font-mono bg-emerald-500/30 text-emerald-300 px-2.5 py-1 rounded-md border border-emerald-500/40 font-bold flex items-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin text-emerald-400" />
+                      Disparando mensagem agora...
+                    </span>
+                  )
                 )}
                 {isPaused ? (
                   <Button size="sm" onClick={handleResumeDispatch} className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
@@ -1996,42 +2495,94 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
               </div>
             </div>
 
+            {/* Aviso especial de Fila Pausada ou Alerta do Servidor */}
+            {isPaused && (
+              <div className="mt-2 bg-amber-500/15 border border-amber-500/40 rounded-lg p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-300">
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                  <div>
+                    <span className="font-bold block">Fila de Disparos em Pausa</span>
+                    <span className="text-amber-300/80 text-[11px]">{typeof queueLastError === 'string' ? queueLastError : 'A fila está pausada. Clique em Continuar para retomar os envios.'}</span>
+                  </div>
+                </div>
+                {!botStatus.connected ? (
+                  <Button
+                    size="sm"
+                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold shrink-0"
+                  >
+                    Escanear QR Code no Topo
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={handleResumeDispatch}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shrink-0"
+                  >
+                    <Play className="w-3 h-3 mr-1" /> Continuar Disparos
+                  </Button>
+                )}
+              </div>
+            )}
+
             {/* Informações detalhadas do Próximo Cliente e Contador em Destaque */}
-            {countdown > 0 && !isPaused && !isBatchResting && (
+            {!isPaused && !isBatchResting && (
               <div className="mt-2 bg-background/60 border border-emerald-500/30 rounded-lg p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-inner">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-                    <Clock className="w-5 h-5 animate-pulse" />
+                    {countdown === 0 || isSkippingCountdown ? (
+                      <RefreshCw className="w-5 h-5 text-emerald-400 animate-spin" />
+                    ) : (
+                      <Clock className="w-5 h-5 animate-pulse text-emerald-400" />
+                    )}
                   </div>
                   <div>
                     <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
-                      Próximo Cliente da Fila:
+                      {countdown === 0 || isSkippingCountdown ? 'Enviando Mensagem Para:' : 'Próximo Cliente da Fila:'}
                     </span>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-bold text-foreground">
-                        {nextLeadInfo?.name || 'Próximo cliente na fila...'}
+                        {String(nextLeadInfo?.name || 'Próximo cliente na fila...')}
                       </span>
                       {nextLeadInfo?.category && (
                         <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/20 py-0">
-                          {nextLeadInfo.category}
+                          {String(nextLeadInfo.category)}
                         </Badge>
                       )}
                       {nextLeadInfo?.phone && (
                         <span className="text-xs font-mono text-muted-foreground">
-                          📲 {nextLeadInfo.phone}
+                          📲 {String(nextLeadInfo.phone)}
                         </span>
                       )}
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                  <div className="text-right">
-                    <span className="text-[9px] uppercase font-bold text-muted-foreground block">Disparando em</span>
-                    <span className="font-mono text-xl sm:text-2xl font-black text-emerald-400 bg-emerald-950/40 px-3 py-0.5 rounded-md border border-emerald-500/40">
-                      {formatTimeMinutesSeconds(countdown)}
-                    </span>
-                  </div>
+                <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                  {countdown > 0 && !isSkippingCountdown ? (
+                    <>
+                      <div className="text-right">
+                        <span className="text-[9px] uppercase font-bold text-muted-foreground block">Disparando em</span>
+                        <span className="font-mono text-xl sm:text-2xl font-black text-emerald-400 bg-emerald-950/40 px-3 py-0.5 rounded-md border border-emerald-500/40">
+                          {formatTimeMinutesSeconds(countdown)}
+                        </span>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        onClick={handleSkipCountdown} 
+                        disabled={isSkippingCountdown}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-9 text-xs shadow-md gap-1"
+                        title="Pular a contagem regressiva e disparar para este cliente agora"
+                      >
+                        <Zap className="w-3.5 h-3.5" /> Disparar Agora
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/50 px-3 py-1.5 rounded-lg text-emerald-400 text-xs font-bold animate-pulse">
+                      <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                      Disparando no WhatsApp agora...
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2039,7 +2590,7 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
             <div className="w-full bg-accent/40 rounded-full h-2.5 overflow-hidden">
               <div 
                 className="bg-emerald-500 h-2.5 rounded-full transition-all duration-300"
-                style={{ width: `${Math.round((currentIndex / (selectedLeadIds.length + currentIndex || 1)) * 100)}%` }}
+                style={{ width: `${Math.min(100, Math.round((currentIndex / Math.max(1, selectedLeadIds.length > 0 ? selectedLeadIds.length : (availableQueueLeads.length || 1))) * 100))}%` }}
               />
             </div>
           </div>
@@ -2049,164 +2600,353 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
       {/* Grid Principal: Fila de Espera vs Configuração da Mensagem */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* Esquerda: Fila de Espera (5 colunas) */}
-        <Card className="lg:col-span-5 border-border shadow-sm flex flex-col h-[760px]">
-          <CardHeader className="pb-3 border-b border-border">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <User className="w-4 h-4 text-primary" />
-                  Fila de Espera ({availableQueueLeads.length})
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Apenas clientes com telefone que NÃO foram acionados.
-                </CardDescription>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <Button 
-                  size="sm" 
-                  onClick={() => setIsNationalProspectModalOpen(true)} 
-                  className="text-xs h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs px-2.5"
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  🇧🇷 Prospectar Estado
-                </Button>
-
-                <Button 
+        {/* Esquerda: Fila de Espera / Já Acionados (5 colunas) */}
+        <Card className="lg:col-span-5 border-border shadow-sm flex flex-col h-[760px] overflow-hidden">
+          <CardHeader className="p-3.5 border-b border-border space-y-3 bg-card/40">
+            {/* Seletor Principal de Abas: Pendentes vs Já Acionados (100% da largura, perfeitamente alinhado) */}
+            <div className="grid grid-cols-2 p-1 bg-accent/30 rounded-xl border border-border/80">
+              <button
+                type="button"
+                onClick={() => setQueueTab('pending')}
+                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                  queueTab === 'pending'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+                }`}
+              >
+                <Send className="w-3.5 h-3.5 shrink-0" />
+                <span>Pendentes</span>
+                <Badge 
                   variant="outline" 
-                  size="sm" 
-                  onClick={handleSelectAll} 
-                  className="text-xs h-8"
-                  disabled={availableQueueLeads.length === 0}
+                  className={`text-[10px] px-1.5 py-0 font-bold ml-1 border-0 ${
+                    queueTab === 'pending' 
+                      ? 'bg-white/20 text-white' 
+                      : 'bg-accent text-muted-foreground'
+                  }`}
                 >
-                  {selectedLeadIds.length === availableQueueLeads.length && availableQueueLeads.length > 0 
-                    ? 'Desmarcar Todos' 
-                    : 'Selecionar Todos'}
-                </Button>
-              </div>
+                  {availableQueueLeads.length}
+                </Badge>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setQueueTab('dispatched')}
+                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                  queueTab === 'dispatched'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-300" />
+                <span>Já Acionados</span>
+                <Badge 
+                  variant="outline" 
+                  className={`text-[10px] px-1.5 py-0 font-bold ml-1 border-0 ${
+                    queueTab === 'dispatched' 
+                      ? 'bg-white/20 text-white' 
+                      : 'bg-accent text-muted-foreground'
+                  }`}
+                >
+                  {alreadyContactedLeads.length}
+                </Badge>
+              </button>
             </div>
 
-            {/* Busca & Filtro de Estados */}
-            <div className="space-y-2 pt-2">
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-1.5">
-                <div className="sm:col-span-5">
+            {/* Barra de Ações Rápidas (Selecionar Todos & Prospectar) */}
+            {queueTab === 'pending' ? (
+              <div className="flex items-center justify-between gap-2">
+                <Button 
+                  variant={selectedLeadIds.length > 0 ? "default" : "outline"}
+                  size="sm" 
+                  onClick={handleSelectAll} 
+                  className={`text-xs h-8 font-semibold flex items-center gap-1.5 transition-all ${
+                    selectedLeadIds.length > 0 ? "bg-primary text-primary-foreground shadow-xs" : "border-border text-foreground hover:bg-accent/40"
+                  }`}
+                  disabled={availableQueueLeads.length === 0}
+                >
+                  <CheckSquare className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {selectedLeadIds.length === availableQueueLeads.length && availableQueueLeads.length > 0 
+                      ? `Desmarcar Todos (${availableQueueLeads.length})` 
+                      : selectedLeadIds.length > 0
+                        ? `${selectedLeadIds.length} de ${availableQueueLeads.length} Marcados`
+                        : `Selecionar Todos (${availableQueueLeads.length})`}
+                  </span>
+                </Button>
+
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => setIsNationalProspectModalOpen(true)} 
+                  className="text-xs h-8 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-bold shadow-xs px-2.5 flex items-center gap-1.5 shrink-0"
+                  title="Prospectar empresas em qualquer estado ou DDD"
+                >
+                  <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>+ Prospectar</span>
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2 py-0.5">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse"></span>
+                  <span><strong className="text-foreground font-semibold">{alreadyContactedLeads.length}</strong> contatos já acionados pelo robô</span>
+                </div>
+                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-[10px] py-0.5 px-2 font-medium shrink-0">
+                  ✓ Isolados do Robô
+                </Badge>
+              </div>
+            )}
+
+            {/* Campo de Busca & Filtro de Estados */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground pointer-events-none" />
+                <Input 
+                  placeholder={queueTab === 'pending' ? "Buscar nome, ramo, fone..." : "Buscar nos contatados..."}
+                  className="pl-8 pr-7 h-8 text-xs bg-background border-border"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button 
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-2 text-xs text-muted-foreground hover:text-foreground p-0.5"
+                    title="Limpar busca"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {queueTab === 'pending' && (
+                <div className="w-32 shrink-0">
                   <select
                     value={stateFilter}
                     onChange={(e) => setStateFilter(e.target.value)}
-                    className="w-full h-8 px-2 rounded-md bg-background border border-input text-[11px] font-medium focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="w-full h-8 px-2 rounded-md bg-background border border-input text-[11px] font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer truncate"
+                    title="Filtrar por Estado / DDD"
                   >
-                    <option value="TODOS">🇧🇷 Todos os Estados</option>
-                    <optgroup label="Sudeste">
-                      {BRAZIL_STATES.filter(s => s.region === 'Sudeste').map(s => (
-                        <option key={s.uf} value={s.uf}>{s.uf} - {s.name} (DDD {s.ddds.slice(0, 2).join(',')})</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Sul">
-                      {BRAZIL_STATES.filter(s => s.region === 'Sul').map(s => (
-                        <option key={s.uf} value={s.uf}>{s.uf} - {s.name} (DDD {s.ddds.slice(0, 2).join(',')})</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Nordeste">
-                      {BRAZIL_STATES.filter(s => s.region === 'Nordeste').map(s => (
-                        <option key={s.uf} value={s.uf}>{s.uf} - {s.name} (DDD {s.ddds.slice(0, 2).join(',')})</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Centro-Oeste">
-                      {BRAZIL_STATES.filter(s => s.region === 'Centro-Oeste').map(s => (
-                        <option key={s.uf} value={s.uf}>{s.uf} - {s.name} (DDD {s.ddds.join(',')})</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Norte">
+                    <option value="TODOS">🇧🇷 Todos Estados</option>
+                    <optgroup label="Região Norte">
                       {BRAZIL_STATES.filter(s => s.region === 'Norte').map(s => (
-                        <option key={s.uf} value={s.uf}>{s.uf} - {s.name} (DDD {s.ddds.join(',')})</option>
+                        <option key={s.uf} value={s.uf}>{s.uf} ({s.ddds.slice(0, 2).join(',')})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Região Sudeste">
+                      {BRAZIL_STATES.filter(s => s.region === 'Sudeste').map(s => (
+                        <option key={s.uf} value={s.uf}>{s.uf} ({s.ddds.slice(0, 2).join(',')})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Região Sul">
+                      {BRAZIL_STATES.filter(s => s.region === 'Sul').map(s => (
+                        <option key={s.uf} value={s.uf}>{s.uf} ({s.ddds.slice(0, 2).join(',')})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Região Nordeste">
+                      {BRAZIL_STATES.filter(s => s.region === 'Nordeste').map(s => (
+                        <option key={s.uf} value={s.uf}>{s.uf} ({s.ddds.slice(0, 2).join(',')})</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Região Centro-Oeste">
+                      {BRAZIL_STATES.filter(s => s.region === 'Centro-Oeste').map(s => (
+                        <option key={s.uf} value={s.uf}>{s.uf} ({s.ddds.slice(0, 2).join(',')})</option>
                       ))}
                     </optgroup>
                   </select>
                 </div>
-                <div className="sm:col-span-7 relative">
-                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
-                  <Input 
-                    placeholder="Buscar por nome, ramo, cidade ou DDD..." 
-                    className="pl-8 h-8 text-xs"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
+              )}
+            </div>
+
+            {/* Categorias / Pastas (quando na aba de pendentes) - SEM BARRA DE ROLAGEM, COM LUPA */}
+            {queueTab === 'pending' && categoryTabs.length > 0 && (
+              <div className="flex flex-col gap-2 pt-2 pb-1 border-t border-border/50">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
+                    <span className="text-[11px] font-bold text-muted-foreground flex items-center gap-1 shrink-0">
+                      <Folder className="w-3.5 h-3.5 text-primary" /> Pasta:
+                    </span>
+                    <select
+                      value={categoryFilter}
+                      onChange={(e) => setCategoryFilter(e.target.value)}
+                      className="h-7 px-2.5 rounded-lg bg-background border border-input text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer w-full max-w-[240px]"
+                      title="Selecione a pasta diretamente sem arrastar"
+                    >
+                      {categoryTabs.map((tab) => (
+                        <option key={tab.id} value={tab.id}>
+                          {tab.emoji} {tab.label} ({tab.count})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Lupa de busca rápida para filtrar as pastas */}
+                  <div className="relative w-full sm:w-48">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-primary pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="🔍 Filtrar pasta..."
+                      value={pendingCategorySearch}
+                      onChange={(e) => setPendingCategorySearch(e.target.value)}
+                      className="h-7 w-full pl-8 pr-6 rounded-lg bg-background border border-input text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground"
+                    />
+                    {pendingCategorySearch && (
+                      <button
+                        type="button"
+                        onClick={() => setPendingCategorySearch('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Pastas em flex-wrap - Quebram linha naturalmente, ZERO barra de rolagem, ZERO arrastar! */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  {categoryTabs
+                    .filter((tab) => {
+                      if (!pendingCategorySearch.trim()) return true;
+                      return tab.label.toLowerCase().includes(pendingCategorySearch.toLowerCase().trim());
+                    })
+                    .map((tab) => {
+                      const isTabActive = categoryFilter === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setCategoryFilter(tab.id)}
+                          className={`text-[11px] px-2.5 py-1 rounded-lg font-semibold transition-all border flex items-center gap-1.5 shrink-0 ${
+                            isTabActive 
+                              ? 'bg-primary text-primary-foreground border-primary shadow-xs' 
+                              : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/40 border-border'
+                          }`}
+                        >
+                          <span>{tab.emoji}</span>
+                          <span>{tab.label}</span>
+                          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                            isTabActive ? 'bg-primary-foreground/25 text-white' : 'bg-muted text-muted-foreground'
+                          }`}>
+                            {tab.count}
+                          </span>
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
-
-              {/* Pastas e Categorias */}
-              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-                {categoryTabs.map((tab) => {
-                  const isTabActive = categoryFilter === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => setCategoryFilter(tab.id)}
-                      className={`text-[11px] px-2.5 py-1 rounded-full whitespace-nowrap font-medium transition-colors border flex items-center gap-1.5 ${
-                        isTabActive 
-                          ? 'bg-primary text-primary-foreground border-primary shadow-xs' 
-                          : 'bg-accent/40 text-muted-foreground hover:text-foreground border-border'
-                      }`}
-                    >
-                      <span>{tab.emoji}</span>
-                      <span>{tab.label}</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                        isTabActive ? 'bg-primary-foreground/25 text-white' : 'bg-accent text-muted-foreground'
-                      }`}>
-                        {tab.count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            )}
           </CardHeader>
 
           <CardContent className="p-3 overflow-y-auto flex-1 space-y-2">
-            {availableQueueLeads.length === 0 ? (
+            {queueTab === 'dispatched' ? (
+              alreadyContactedLeads.length === 0 ? (
+                <div className="p-8 text-center space-y-3 border border-dashed border-border rounded-xl bg-card/40 my-2">
+                  <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-sm text-foreground">Nenhum cliente acionado ainda</h4>
+                    <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                      Assim que você iniciar os disparos no WhatsApp, os clientes contatados sairão da fila de pendentes e aparecerão aqui automaticamente.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                alreadyContactedLeads.map((lead) => {
+                  const phone = formatBrazilianPhone(lead.phone);
+                  const sub = lead.subcategory || 'Geral';
+                  const meta = getCategoryMeta(sub);
+
+                  return (
+                    <div
+                      key={lead.id}
+                      className="p-3 rounded-lg border bg-card/60 border-border hover:bg-accent/20 transition-all flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className="font-bold text-xs text-foreground truncate">{lead.name}</h4>
+                            <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px] py-0 px-1.5 font-medium">
+                              ✓ Já Acionado
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5 flex-wrap">
+                            <span className="text-emerald-400 font-medium">📞 {phone}</span>
+                            <span>•</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              🕒 {lead.dispatchedAt}
+                            </span>
+                          </div>
+                          {lead.dispatchedMessage && (
+                            <p className="text-[10px] text-muted-foreground/80 italic mt-1 line-clamp-1 border-l-2 border-emerald-500/40 pl-1.5">
+                              "{lead.dispatchedMessage}"
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span 
+                          className="text-[10px] px-2 py-0.5 rounded-full font-semibold border hidden sm:inline-flex items-center gap-1"
+                          style={{
+                            backgroundColor: `${meta.color}15`,
+                            color: meta.color,
+                            borderColor: `${meta.color}35`
+                          }}
+                        >
+                          {meta.badge.split(' ')[0]} {sub}
+                        </span>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleReactivateLead(lead)}
+                          className="h-7 text-[11px] border-border hover:border-primary/50 text-muted-foreground hover:text-foreground px-2"
+                          title="Mover este cliente de volta para a fila de pendentes para novo disparo"
+                        >
+                          <RotateCcw className="w-3 h-3 mr-1 text-primary" /> Reativar
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              )
+            ) : availableQueueLeads.length === 0 ? (
               <div className="p-8 text-center space-y-4 border border-dashed border-border rounded-xl bg-card/40 my-2">
                 <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto">
                   <CheckCircle2 className="w-6 h-6" />
                 </div>
                 <div className="space-y-1">
                   <h4 className="font-bold text-foreground text-base">
-                    {history.length > 0 ? '🎉 Todos os clientes cadastrados já foram acionados hoje!' : 'Fila de espera vazia'}
+                    {alreadyContactedLeads.length > 0 ? '🎉 Todos os clientes cadastrados já foram acionados!' : 'Fila de espera vazia'}
                   </h4>
                   <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
-                    {history.length > 0
-                      ? `Você já disparou mensagens para os ${history.length} clientes cadastrados hoje. Para disparar novamente, clique no botão abaixo para liberar os clientes ou adicione mais estabelecimentos pelo Brasil.`
-                      : 'Não há clientes na fila de espera no momento. Adicione novos contatos para abastecer o robô e iniciar os disparos.'}
+                    {alreadyContactedLeads.length > 0
+                      ? 'Você já disparou mensagens para os clientes cadastrados. Para disparar novamente, acesse a aba "Já Acionados" ou adicione mais estabelecimentos pelo Brasil.'
+                      : 'Não há clientes pendentes para disparo no momento. Adicione novos contatos para abastecer o robô e iniciar os disparos.'}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                  {history.length > 0 && (
-                    <Button 
-                      onClick={handleClearHistory}
-                      size="sm"
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 shadow-sm"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-                      Liberar Clientes para Reenvio
-                    </Button>
-                  )}
                   <Button 
-                    onClick={() => setIsNationalProspectModalOpen(true)}
+                    onClick={() => setQueueTab('dispatched')}
                     size="sm"
                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 shadow-sm"
                   >
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    🇧🇷 Prospectar por Estado / DDD
+                    <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                    Ver Clientes Já Acionados ({alreadyContactedLeads.length})
                   </Button>
                   <Button 
-                    onClick={() => setIsImportMapsOpen(true)}
+                    onClick={() => setIsNationalProspectModalOpen(true)} 
                     size="sm"
                     variant="outline"
                     className="border-border hover:bg-accent/40 text-muted-foreground font-semibold text-xs h-9"
                   >
-                    <MapPin className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
-                    Buscar no Google Maps
+                    <Plus className="w-3.5 h-3.5 mr-1.5" />
+                    🇧🇷 Prospectar por Estado / DDD
                   </Button>
                 </div>
               </div>
@@ -2253,17 +2993,34 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                       </div>
                     </div>
 
-                    <span 
-                      className="text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 border inline-flex items-center gap-1"
-                      style={{
-                        backgroundColor: `${meta.color}15`,
-                        color: meta.color,
-                        borderColor: `${meta.color}35`
-                      }}
-                    >
-                      <span>{meta.badge.split(' ')[0]}</span>
-                      <span>{meta.subcategory}</span>
-                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenDirectWhatsApp(lead);
+                        }}
+                        className="h-7 px-2 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15 border border-emerald-500/30 gap-1 rounded-md transition-all shadow-xs"
+                        title="Abrir diretamente no WhatsApp Web / Desktop sem precisar de QR Code"
+                      >
+                        <Zap className="w-3 h-3 text-emerald-400" />
+                        <span className="hidden sm:inline">WhatsApp Web</span>
+                      </Button>
+
+                      <span 
+                        className="text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 border inline-flex items-center gap-1"
+                        style={{
+                          backgroundColor: `${meta.color}15`,
+                          color: meta.color,
+                          borderColor: `${meta.color}35`
+                        }}
+                      >
+                        <span>{meta.badge.split(' ')[0]}</span>
+                        <span>{meta.subcategory}</span>
+                      </span>
+                    </div>
                   </div>
                 );
               })
@@ -3318,12 +4075,105 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
               </div>
 
               {/* Seletor de Pastas / Segmentos e Controles de Visualização */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 pt-1">
-                {/* Pílulas de Pastas */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full scrollbar-hide flex-1">
-                  <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1 shrink-0 pr-1">
-                    <Folder className="w-3.5 h-3.5 text-primary" /> Pastas:
-                  </span>
+              <div className="flex flex-col gap-2 pt-1">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                  {/* Seletor Manual Suspenso para o Histórico */}
+                  <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+                    <span className="text-xs font-bold text-muted-foreground flex items-center gap-1 shrink-0">
+                      <Folder className="w-3.5 h-3.5 text-primary" /> Pasta:
+                    </span>
+                    <select
+                      value={historyCategoryFilter}
+                      onChange={(e) => handleSelectHistoryCategory(e.target.value)}
+                      className="h-8 px-2.5 rounded-lg bg-background border border-input text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer max-w-xs"
+                      title="Selecione manualmente a pasta do histórico sem arrastar"
+                    >
+                      <option value="Todas">📁 Todas as Pastas ({history.length})</option>
+                      {historyCategoriesList.map((cat) => {
+                        const meta = getCategoryMeta(cat);
+                        const count = historyCategoriesMap[cat] || 0;
+                        return (
+                          <option key={cat} value={cat}>
+                            {meta.badge.split(' ')[0] || '📁'} {meta.subcategory || cat} ({count})
+                          </option>
+                        );
+                      })}
+                    </select>
+
+                    {/* Lupa de busca rápida para filtrar as pastas do histórico */}
+                    <div className="relative w-full sm:w-48">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-primary pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="🔍 Filtrar pasta..."
+                        value={historyCategorySearch}
+                        onChange={(e) => setHistoryCategorySearch(e.target.value)}
+                        className="h-8 w-full pl-8 pr-6 rounded-lg bg-background border border-input text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground"
+                      />
+                      {historyCategorySearch && (
+                        <button
+                          type="button"
+                          onClick={() => setHistoryCategorySearch('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Alternador de Modo e Botões Expandir/Recolher */}
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    <div className="flex items-center bg-accent/40 p-0.5 rounded-lg border border-border text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setHistoryViewMode('by_folder')}
+                        className={`px-2.5 py-1 rounded-md font-bold transition-all ${
+                          historyViewMode === 'by_folder'
+                            ? 'bg-primary text-primary-foreground shadow-xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        📁 Por Pasta
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHistoryViewMode('by_date')}
+                        className={`px-2.5 py-1 rounded-md font-bold transition-all ${
+                          historyViewMode === 'by_date'
+                            ? 'bg-primary text-primary-foreground shadow-xs'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        📅 Por Data
+                      </button>
+                    </div>
+
+                    {historyViewMode === 'by_folder' && (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleExpandAllFolders}
+                          className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                        >
+                          Expandir Todas
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleCollapseAllFolders}
+                          className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                        >
+                          Recolher Todas
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Pílulas de Pastas - EM FLEX-WRAP, SEM BARRA DE ROLAGEM, SEM ARRASTAR! */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
                   <button
                     type="button"
                     onClick={() => handleSelectHistoryCategory('Todas')}
@@ -3339,85 +4189,41 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                     </span>
                   </button>
 
-                  {historyCategoriesList.map(cat => {
-                    const meta = getCategoryMeta(cat);
-                    const isSelected = historyCategoryFilter === cat;
-                    const count = historyCategoriesMap[cat] || 0;
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => handleSelectHistoryCategory(cat)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all shrink-0 flex items-center gap-1.5 border ${
-                          isSelected
-                            ? 'bg-accent font-bold text-foreground border-primary shadow-xs'
-                            : 'bg-card text-muted-foreground hover:bg-accent/60 hover:text-foreground border-border'
-                        }`}
-                      >
-                        <span>{meta.badge.split(' ')[0] || '📁'}</span>
-                        <span>{meta.subcategory || cat}</span>
-                        <span 
-                          className="px-1.5 py-0.2 rounded-full text-[10px] font-bold border"
-                          style={{
-                            backgroundColor: `${meta.color}15`,
-                            color: meta.color,
-                            borderColor: `${meta.color}30`
-                          }}
+                  {historyCategoriesList
+                    .filter(cat => {
+                      if (!historyCategorySearch.trim()) return true;
+                      return cat.toLowerCase().includes(historyCategorySearch.toLowerCase().trim());
+                    })
+                    .map(cat => {
+                      const meta = getCategoryMeta(cat);
+                      const isSelected = historyCategoryFilter === cat;
+                      const count = historyCategoriesMap[cat] || 0;
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => handleSelectHistoryCategory(cat)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all shrink-0 flex items-center gap-1.5 border ${
+                            isSelected
+                              ? 'bg-accent font-bold text-foreground border-primary shadow-xs'
+                              : 'bg-card text-muted-foreground hover:bg-accent/60 hover:text-foreground border-border'
+                          }`}
                         >
-                          {count}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Alternador de Modo e Botões Expandir/Recolher */}
-                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                  <div className="flex items-center bg-accent/40 p-0.5 rounded-lg border border-border text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setHistoryViewMode('by_folder')}
-                      className={`px-2.5 py-1 rounded-md font-bold transition-all ${
-                        historyViewMode === 'by_folder'
-                          ? 'bg-primary text-primary-foreground shadow-xs'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      📁 Por Pasta
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setHistoryViewMode('by_date')}
-                      className={`px-2.5 py-1 rounded-md font-bold transition-all ${
-                        historyViewMode === 'by_date'
-                          ? 'bg-primary text-primary-foreground shadow-xs'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      📅 Por Data
-                    </button>
-                  </div>
-
-                  {historyViewMode === 'by_folder' && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleExpandAllFolders}
-                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-                      >
-                        Expandir Todas
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleCollapseAllFolders}
-                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-                      >
-                        Recolher Todas
-                      </Button>
-                    </div>
-                  )}
+                          <span>{meta.badge.split(' ')[0] || '📁'}</span>
+                          <span>{meta.subcategory || cat}</span>
+                          <span 
+                            className="px-1.5 py-0.2 rounded-full text-[10px] font-bold border"
+                            style={{
+                              backgroundColor: `${meta.color}15`,
+                              color: meta.color,
+                              borderColor: `${meta.color}30`
+                            }}
+                          >
+                            {count}
+                          </span>
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
             </div>

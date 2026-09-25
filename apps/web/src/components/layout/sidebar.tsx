@@ -9,14 +9,14 @@ import {
   Calendar, FileText, Package,
   Building2, Users2, Target,
   BarChart3, BrainCircuit, Settings,
-  Radar,
-  Bell, X, Plus, LogOut
+  X, Plus, LogOut, GitBranch, UserCheck
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAuth } from '@/hooks/use-auth';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { WCTechSignature } from './wctech-signature';
+import { UserProfileModal } from '@/components/user/user-profile-modal';
 
 const navSections = [
   {
@@ -24,7 +24,7 @@ const navSections = [
     items: [
       { title: 'Dashboard', href: '/', icon: LayoutDashboard },
       { title: 'Leads', href: '/leads', icon: Users },
-      { title: 'Pipeline', href: '/pipeline', icon: Trello },
+      { title: 'CRM', href: '/pipeline', icon: Trello },
       { title: 'Mapa Inteligente', href: '/map', icon: MapIcon },
     ],
   },
@@ -41,6 +41,7 @@ const navSections = [
     label: 'Automação',
     items: [
       { title: 'Robô WhatsApp', href: '/whatsapp', icon: MessageSquare },
+      { title: 'Fluxos de Conversa', href: '/flows', icon: GitBranch, badge: 'NOVO' },
       { title: 'IA Comercial', href: '/ai', icon: BrainCircuit, badge: 'IA' },
     ],
   },
@@ -55,6 +56,7 @@ const navSections = [
   {
     label: 'Sistema',
     items: [
+      { title: 'Usuários', href: '/users', icon: UserCheck },
       { title: 'Configurações', href: '/settings', icon: Settings },
     ],
   },
@@ -64,6 +66,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const { user } = useAuthStore();
   const { logout } = useAuth();
 
@@ -163,13 +166,31 @@ export function Sidebar() {
       <div className="border-t border-border">
         {/* User Area */}
         <div className="p-3">
-          <div className={cn('flex items-center gap-3', collapsed && 'justify-center')}>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border bg-accent text-foreground border-border">
-              <span className="text-xs font-bold">{user?.name?.charAt(0) || 'U'}</span>
-            </div>
+          <div 
+            onClick={() => setIsProfileModalOpen(true)}
+            title="Clique para editar seu perfil (Foto, Nome e Senha)"
+            className={cn(
+              'flex items-center gap-3 p-2 -m-2 rounded-xl transition-all cursor-pointer hover:bg-accent/80 group border border-transparent hover:border-border',
+              collapsed && 'justify-center p-0 m-0'
+            )}
+          >
+            {user?.avatar ? (
+              <img
+                src={user.avatar}
+                alt={user?.name || 'Avatar'}
+                className="w-8 h-8 rounded-lg object-cover shrink-0 border border-primary/40 shadow-xs ring-2 ring-primary/20"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border bg-accent text-foreground border-border group-hover:border-primary/50 transition">
+                <span className="text-xs font-bold">{user?.name?.charAt(0) || 'U'}</span>
+              </div>
+            )}
             {!collapsed && (
               <div className="overflow-hidden flex-1 min-w-0">
-                <p className="text-xs font-bold text-foreground truncate">{user?.name || 'Usuário'}</p>
+                <div className="flex items-center justify-between gap-1">
+                  <p className="text-xs font-bold text-foreground truncate group-hover:text-primary transition">{user?.name || 'Usuário'}</p>
+                  <span className="text-[10px] text-muted-foreground group-hover:text-primary opacity-0 group-hover:opacity-100 transition">✏️</span>
+                </div>
                 <p className="text-[10px] text-muted-foreground truncate">{user?.role?.name || 'Administrador'}</p>
               </div>
             )}
@@ -177,17 +198,8 @@ export function Sidebar() {
         </div>
 
         {/* Utility Buttons */}
-        <div className={cn('px-3 pb-2', collapsed ? 'flex flex-col gap-1.5 items-center' : 'flex items-center justify-between gap-1.5')}>
+        <div className={cn('px-3 pb-2', collapsed ? 'flex flex-col gap-1.5 items-center' : 'flex items-center justify-between gap-2')}>
           <ThemeToggle />
-          <div className="relative">
-            <button
-              type="button"
-              title="Central de Notificações"
-              className="relative p-2 rounded-xl border transition-all duration-200 flex items-center justify-center shrink-0 cursor-pointer group active:scale-95 bg-secondary hover:bg-accent border-border text-muted-foreground flex-1 w-full"
-            >
-              <Bell className="w-4 h-4 stroke-[2.3]" />
-            </button>
-          </div>
           <button
             type="button"
             onClick={logout}
@@ -234,6 +246,11 @@ export function Sidebar() {
         </div>
       )}
 
+      {/* Modal de Edição de Perfil de Usuário */}
+      <UserProfileModal 
+        isOpen={isProfileModalOpen} 
+        onClose={() => setIsProfileModalOpen(false)} 
+      />
     </>
   );
 }

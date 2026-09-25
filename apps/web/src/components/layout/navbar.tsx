@@ -1,16 +1,17 @@
 'use client';
 
-import { Bell, Search, ChevronRight, LogOut } from 'lucide-react';
+import { Search, ChevronRight, LogOut } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/use-auth';
 import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
+import { NotificationBell } from './notification-bell';
 
 const pageTitles: Record<string, { title: string; description: string }> = {
   '/': { title: 'Dashboard Geral', description: 'Métricas em tempo real, mapa e prospecção ativa' },
   '/leads': { title: 'Leads', description: 'Gerenciar e qualificar oportunidades de negócio' },
-  '/pipeline': { title: 'Pipeline', description: 'Funil comercial Kanban interativo' },
+  '/pipeline': { title: 'CRM', description: 'Funil comercial de vendas e gestão de clientes' },
   '/map': { title: 'Mapa Inteligente', description: 'Visualização geográfica de oportunidades' },
   '/visits': { title: 'Visitas', description: 'Agendamento e histórico de visitas presenciais' },
   '/proposals': { title: 'Propostas', description: 'Gerenciar propostas comerciais enviadas' },
@@ -58,10 +59,7 @@ export function Navbar() {
           />
         </div>
 
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="w-4 h-4" />
-          <span className="absolute top-2 right-2 w-2 h-2 bg-destructive rounded-full" />
-        </Button>
+        <NotificationBell />
 
         <Button variant="outline" size="sm" onClick={() => logout()} className="gap-1.5 text-xs">
           <LogOut className="w-3.5 h-3.5" />

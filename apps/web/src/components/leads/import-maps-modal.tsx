@@ -102,12 +102,16 @@ export function ImportMapsModal({ isOpen, onClose, onImport }: ImportMapsModalPr
     
     try {
       const keyParam = customKey.trim() ? `&key=${encodeURIComponent(customKey.trim())}` : '';
-      const res = await fetch(`/api/places?q=${encodeURIComponent(searchQuery)}${keyParam}`);
+      const ufParam = selectedUF !== 'TODOS' ? `&uf=${encodeURIComponent(selectedUF)}` : '';
+      const res = await fetch(`/api/places?q=${encodeURIComponent(searchQuery)}${keyParam}${ufParam}`);
       const data = await res.json();
       
       if (data.success && Array.isArray(data.data)) {
         setSearchResults(data.data);
         setProviderName(data.providerName || 'Busca Concluída');
+        if (data.googleNotice) {
+          toast(data.googleNotice, { icon: 'ℹ️', duration: 4000 });
+        }
         if (data.data.length === 0) {
           toast('Nenhum estabelecimento encontrado. Tente especificar a cidade (ex: Padarias em Manaus)', { icon: 'ℹ️' });
         }
@@ -234,7 +238,7 @@ export function ImportMapsModal({ isOpen, onClose, onImport }: ImportMapsModalPr
             className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'search' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/20'}`}
             onClick={() => setActiveTab('search')}
           >
-            Busca Automática no Google Places (API)
+            🚀 Busca Multi-API Turbo (Google + Overpass + OSM)
           </button>
           <button 
             className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'paste' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/20'}`}
@@ -369,8 +373,15 @@ export function ImportMapsModal({ isOpen, onClose, onImport }: ImportMapsModalPr
               {searchResults.length > 0 && (
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-accent/30 rounded-lg border border-border">
                   <div className="text-sm">
-                    <span className="font-bold text-foreground">{searchResults.length} estabelecimentos encontrados</span>
-                    <span className="text-muted-foreground ml-2">({unimportedCount} novos para importar)</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-foreground">{searchResults.length} estabelecimentos encontrados</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary font-semibold">
+                        Multi-API Ativa
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {unimportedCount} novos para importar • {providerName || 'Motores: Google + Overpass + OSM'}
+                    </div>
                   </div>
                   
                   {unimportedCount > 0 && (
@@ -422,6 +433,11 @@ export function ImportMapsModal({ isOpen, onClose, onImport }: ImportMapsModalPr
                             <span className="text-xs px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
                               ★ {place.rating || 4.5}
                             </span>
+                            {place.provider && (
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/30 font-medium">
+                                ⚡ {place.provider}
+                              </span>
+                            )}
                           </div>
                           
                           <p className="text-xs text-muted-foreground truncate">{place.formatted_address}</p>

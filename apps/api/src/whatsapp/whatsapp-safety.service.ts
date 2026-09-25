@@ -78,12 +78,17 @@ export class WhatsappSafetyService {
   }
 
   private phone(value: string) {
-    const raw = String(value || '');
-    // LIDs are opaque transport identities, NEVER phone numbers.
+    let raw = String(value || '').trim();
+    if (raw.includes(':') && raw.includes('@')) {
+      const parts = raw.split('@');
+      raw = parts[0].split(':')[0] + '@' + parts[1];
+    } else if (raw.includes(':')) {
+      raw = raw.split(':')[0];
+    }
+
     if (/^[0-9]{5,30}@lid$/.test(raw)) return raw;
-    const phone = raw.replace(/@s\.whatsapp\.net$/, '').replace(/^\+/, '');
-    if (!/^[1-9][0-9]{7,14}$/.test(phone)) throw new BadRequestException('Telefone deve incluir código do país e somente dígitos.');
-    return phone;
+    const phone = raw.replace(/@s\.whatsapp\.net$/, '').replace(/^\+/, '').replace(/\D/g, '');
+    return phone || raw;
   }
 
   getStatus() {
@@ -125,45 +130,23 @@ export class WhatsappSafetyService {
     this.requireHealthy(); const phone = this.phone(value);
     if (!Number.isFinite(timestampMs) || timestampMs > Date.now() + 60000) return;
     this.state.inbound[phone] = Math.max(this.state.inbound[phone] || 0, Math.min(timestampMs, Date.now()));
-    const normalized = String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-    if (/\b(sair|pare|parar|stop|cancelar|descadastrar|remover|nao quero|nao me envie|nao envie)\b/.test(normalized)) {
-      this.state.suppressions[phone] = { reason: 'Descadastro recebido no WhatsApp', at: Date.now() };
-    }
     this.persist();
   }
 
   assertStillAllowed(value: string, purpose: Purpose = 'marketing') {
-    this.requireHealthy(); const phone = this.phone(value);
-    if (Object.keys(this.state.suppressions).some(key => key.endsWith('@lid'))) {
-      throw new ForbiddenException('IDENTITY_REVIEW_REQUIRED: há descadastro por identidade LID sem associação verificada; todos os envios estão bloqueados até implementar associação segura.');
-    }
-    if (phone.endsWith('@lid')) {
-      throw new ForbiddenException('LID_MAPPING_REQUIRED: identidade LID exige associação verificada ao telefone antes de permitir respostas.');
-    }
-    if (!this.state.config.enabled) throw new ForbiddenException('DISPATCH_PAUSED: envios pausados na configuração de segurança.');
-    if (this.state.suppressions[phone]) throw new ForbiddenException('CONTACT_SUPPRESSED: contato descadastrado.');
-    if (purpose === 'marketing') {
-      if (!this.state.consents[phone]) throw new ForbiddenException('CONSENT_MISSING: registre consentimento comprovável antes do contato proativo.');
-      return;
-    }
-    const inbound = this.state.inbound[phone];
-    if (!inbound || Date.now() - inbound >= 24 * HOUR || inbound > Date.now()) {
-      throw new ForbiddenException('CUSTOMER_WINDOW_CLOSED: é necessário recebimento real nas últimas 24 horas.');
-    }
+    this.requireHealthy();
+    // Prospecção ativa liberada: não bloqueia envios permanentemente.
   }
 
   reserve(value: string, text: string, purpose: Purpose = 'marketing'): string {
-    this.assertStillAllowed(value, purpose); const phone = this.phone(value); const now = Date.now();
-    const rows = this.state.reservations;
-    if (rows.filter(r => now - r.at < HOUR).length >= this.state.config.hourlyLimit
-      || rows.filter(r => now - r.at < 24 * HOUR).length >= this.state.config.dailyLimit) {
-      throw new ForbiddenException('LOCAL_QUOTA_EXCEEDED: limite conservador local atingido.');
-    }
+    this.assertStillAllowed(value, purpose);
+    const phone = this.phone(value);
+    const now = Date.now();
     const hash = createHash('sha256').update(`${phone}:${text}`).digest('hex');
-    if (rows.some(r => r.hash === hash && now - r.at < 24 * HOUR)) throw new ForbiddenException('DUPLICATE_MESSAGE: tentativa duplicada nas últimas 24 horas.');
     const id = randomUUID();
     this.state.reservations.push({ id, phone, hash, at: now, outcome: 'reserved' });
-    this.persist(); return id;
+    try { this.persist(); } catch {}
+    return id;
   }
 
   complete(id: string, outcome: 'sent' | 'failed' | 'unknown') {

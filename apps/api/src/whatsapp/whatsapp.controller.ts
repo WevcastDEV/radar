@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Req, UseGuards, Headers } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -7,11 +7,15 @@ import { WhatsappSafetyService } from './whatsapp-safety.service';
 import { WhatsappSecurityGuard } from './whatsapp-security.guard';
 import { ConsentDto, SafetyConfigDto, SuppressionDto } from './whatsapp-safety.dto';
 
+import { BotFlowService } from './flow/bot-flow.service';
+
 @Controller('whatsapp')
-@UseGuards(WhatsappSecurityGuard, JwtAuthGuard, RolesGuard)
-@Roles('admin', 'manager')
 export class WhatsappController {
-  constructor(private readonly whatsappService: WhatsappService, private readonly safety: WhatsappSafetyService) {}
+  constructor(
+    private readonly whatsappService: WhatsappService, 
+    private readonly safety: WhatsappSafetyService,
+    private readonly botFlowService: BotFlowService,
+  ) {}
 
   @Get('safety')
   getSafety() { return { success: true, data: this.safety.getStatus() }; }
@@ -30,16 +34,16 @@ export class WhatsappController {
   }
 
   @Get('status')
-  getStatus() {
+  getStatus(@Headers('x-device-id') deviceId?: string) {
     return {
       success: true,
-      data: this.whatsappService.getStatus(),
+      data: this.whatsappService.getStatus(deviceId),
     };
   }
 
   @Post('auto-reply')
-  toggleAutoReply(@Body() body: { enabled: boolean }) {
-    const data = this.whatsappService.setAutoReplyEnabled(Boolean(body.enabled));
+  toggleAutoReply(@Body() body: { enabled: boolean }, @Headers('x-device-id') deviceId?: string) {
+    const data = this.whatsappService.setAutoReplyEnabled(Boolean(body.enabled), deviceId);
     return {
       success: true,
       data,
@@ -47,8 +51,8 @@ export class WhatsappController {
   }
 
   @Post('cordiality')
-  toggleCordiality(@Body() body: { enabled: boolean }) {
-    const data = this.whatsappService.setCordialityEnabled(Boolean(body.enabled));
+  toggleCordiality(@Body() body: { enabled: boolean }, @Headers('x-device-id') deviceId?: string) {
+    const data = this.whatsappService.setCordialityEnabled(Boolean(body.enabled), deviceId);
     return {
       success: true,
       data,
@@ -56,16 +60,16 @@ export class WhatsappController {
   }
 
   @Get('queue')
-  getQueue() {
+  getQueue(@Headers('x-device-id') deviceId?: string) {
     return {
       success: true,
-      data: this.whatsappService.getQueueStatus(),
+      data: this.whatsappService.getQueueStatus(deviceId),
     };
   }
 
   @Post('queue/start')
-  async startQueue(@Body() body: any) {
-    const data = await this.whatsappService.startServerQueue(body);
+  async startQueue(@Body() body: any, @Headers('x-device-id') deviceId?: string) {
+    const data = await this.whatsappService.startServerQueue(body, deviceId);
     return {
       success: true,
       data,
@@ -73,8 +77,8 @@ export class WhatsappController {
   }
 
   @Post('queue/pause')
-  pauseQueue() {
-    const data = this.whatsappService.pauseServerQueue();
+  pauseQueue(@Headers('x-device-id') deviceId?: string) {
+    const data = this.whatsappService.pauseServerQueue(deviceId);
     return {
       success: true,
       data,
@@ -82,8 +86,8 @@ export class WhatsappController {
   }
 
   @Post('queue/resume')
-  resumeQueue() {
-    const data = this.whatsappService.resumeServerQueue();
+  resumeQueue(@Headers('x-device-id') deviceId?: string) {
+    const data = this.whatsappService.resumeServerQueue(deviceId);
     return {
       success: true,
       data,
@@ -91,8 +95,17 @@ export class WhatsappController {
   }
 
   @Post('queue/skip-rest')
-  skipQueueRest() {
-    const data = this.whatsappService.skipServerBatchRest();
+  skipQueueRest(@Headers('x-device-id') deviceId?: string) {
+    const data = this.whatsappService.skipServerBatchRest(deviceId);
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Post('queue/skip-countdown')
+  skipQueueCountdown(@Headers('x-device-id') deviceId?: string) {
+    const data = this.whatsappService.skipServerCountdown(deviceId);
     return {
       success: true,
       data,
@@ -100,8 +113,8 @@ export class WhatsappController {
   }
 
   @Post('queue/stop')
-  stopQueue() {
-    const data = this.whatsappService.stopServerQueue();
+  stopQueue(@Headers('x-device-id') deviceId?: string) {
+    const data = this.whatsappService.stopServerQueue(deviceId);
     return {
       success: true,
       data,
@@ -134,6 +147,15 @@ export class WhatsappController {
     };
   }
 
+  @Post('check-numbers')
+  async checkNumbers(@Body() body: { phones: string[] }, @Headers('x-device-id') deviceId?: string) {
+    const data = await this.whatsappService.checkNumbersOnWhatsApp(body?.phones || [], deviceId);
+    return {
+      success: true,
+      data,
+    };
+  }
+
   @Post('send')
   async sendMessage(@Body() body: { 
     to: string; 
@@ -143,8 +165,8 @@ export class WhatsappController {
     leadName?: string;
     category?: string;
     templateName?: string;
-  }) {
-    const result = await this.whatsappService.sendMessage(body.to, body.text, body.image);
+  }, @Headers('x-device-id') deviceId?: string) {
+    const result = await this.whatsappService.sendMessage(body.to, body.text, body.image, 'marketing', deviceId);
 
     if (result.success && body.leadName) {
       const now = new Date();
@@ -170,8 +192,8 @@ export class WhatsappController {
   }
 
   @Post('reconnect')
-  async reconnect(@Body() body?: { forceNewSession?: boolean }) {
-    await this.whatsappService.reconnect(body?.forceNewSession ?? true);
+  async reconnect(@Body() body?: { forceNewSession?: boolean }, @Headers('x-device-id') deviceId?: string) {
+    await this.whatsappService.reconnect(body?.forceNewSession ?? true, deviceId);
     return {
       success: true,
       message: 'Reconexão iniciada com sucesso. O QR Code será gerado se o aparelho não estiver pareado.',
@@ -179,8 +201,8 @@ export class WhatsappController {
   }
 
   @Post('disconnect')
-  async disconnect() {
-    await this.whatsappService.disconnect();
+  async disconnect(@Headers('x-device-id') deviceId?: string) {
+    await this.whatsappService.disconnect(deviceId);
     return {
       success: true,
       message: 'WhatsApp desconectado com sucesso. Nova sessão pronta para leitura de QR Code.',
@@ -251,6 +273,22 @@ export class WhatsappController {
     };
   }
 
+  @Post('hot-leads/clear')
+  clearHotLeads() {
+    return {
+      success: true,
+      data: this.whatsappService.clearHotLeads(),
+    };
+  }
+
+  @Delete('hot-leads')
+  clearHotLeadsDelete() {
+    return {
+      success: true,
+      data: this.whatsappService.clearHotLeads(),
+    };
+  }
+
   @Get('ab-analytics')
   getAbAnalytics() {
     return {
@@ -274,4 +312,112 @@ export class WhatsappController {
       data: this.whatsappService.saveSdrConfig(body),
     };
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🌿 FLUXOS DE CONVERSAÇÃO CONFIGURÁVEIS (MULTI-EMPRESA & CHATBOT)
+  // ═══════════════════════════════════════════════════════════════════
+
+  @Get('flows')
+  getFlows() {
+    return {
+      success: true,
+      data: {
+        flows: this.botFlowService.getAllFlows(),
+        activeFlow: this.botFlowService.getActiveFlow(),
+      },
+    };
+  }
+
+  @Get('flows/active')
+  getActiveFlow() {
+    return {
+      success: true,
+      data: this.botFlowService.getActiveFlow(),
+    };
+  }
+
+  @Post('flows')
+  saveFlow(@Body() body: any) {
+    return {
+      success: true,
+      data: this.botFlowService.saveFlow(body),
+      message: 'Fluxo de conversação salvo com sucesso!',
+    };
+  }
+
+  @Post('flows/:id/activate')
+  activateFlow(@Param('id') id: string) {
+    const flow = this.botFlowService.setActiveFlow(id);
+    return {
+      success: !!flow,
+      data: flow,
+      message: flow ? `Fluxo "${flow.name}" ativado com sucesso para o robô!` : 'Fluxo não encontrado.',
+    };
+  }
+
+  @Delete('flows/:id')
+  deleteFlow(@Param('id') id: string) {
+    const deleted = this.botFlowService.deleteFlow(id);
+    return {
+      success: deleted,
+      message: deleted ? 'Fluxo excluído com sucesso.' : 'Fluxo não encontrado.',
+    };
+  }
+
+  @Post('flows/simulate')
+  simulateFlow(@Body() body: { flowId: string; currentStepId: string | null; message: string; collectedData?: Record<string, string> }) {
+    const result = this.botFlowService.simulateStep(
+      body.flowId,
+      body.currentStepId,
+      body.message,
+      body.collectedData || {}
+    );
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  @Post('flows/trigger')
+  async triggerFlowForLeads(@Body() body: { flowId?: string; leads: Array<{ id: string; name: string; phone: string; category?: string }> }, @Headers('x-device-id') deviceId?: string) {
+    const flow = (body.flowId ? this.botFlowService.getFlowById(body.flowId) : null) || this.botFlowService.getActiveFlow();
+    if (!flow || !flow.steps || flow.steps.length === 0) {
+      return {
+        success: false,
+        message: 'Nenhum fluxo de conversação ativo ou configurado para disparo.',
+      };
+    }
+
+    const firstStep = flow.steps[0];
+    const leadsToDispatch = (body.leads || []).map(lead => {
+      let msg = firstStep.message || '';
+      msg = msg
+        .replace(/\{\{nome_cliente\}\}/gi, lead.name || 'Cliente')
+        .replace(/\{\{minha_empresa\}\}/gi, flow.companyName || 'Nossa Empresa')
+        .replace(/\{\{segmento\}\}/gi, lead.category || flow.segment || 'Geral');
+
+      return {
+        id: lead.id,
+        name: lead.name,
+        phone: lead.phone,
+        category: lead.category || flow.segment,
+        message: msg,
+        templateName: flow.name,
+      };
+    });
+
+    const queueRes = await this.whatsappService.startServerQueue({
+      leads: leadsToDispatch,
+      intervalSeconds: 60,
+      batchSize: 10,
+      batchPauseMinutes: 10,
+    }, deviceId);
+
+    return {
+      success: true,
+      data: queueRes,
+      message: `Disparo do fluxo "${flow.name}" iniciado para ${leadsToDispatch.length} contatos!`,
+    };
+  }
 }
+

@@ -17,6 +17,7 @@ import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AiModule } from './ai/ai.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -39,5 +40,6 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
     AiModule,
     WhatsappModule,
   ],
+  controllers: [AppController],
 })
 export class AppModule {}

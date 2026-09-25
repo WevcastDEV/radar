@@ -112,14 +112,32 @@ export function getStoredLeads(): LeadListItem[] {
           const stObj = leadUF ? getStateByUF(leadUF) : null;
           const defaultDDD = stObj?.ddds?.[0] || '92';
           const formatted = formatBrazilianPhone(currentPhone, defaultDDD);
+
+          let leadObj = l;
+          const cleanDigits = (formatted || currentPhone || '').replace(/\D/g, '');
+
+          // Identifica números sem WhatsApp (como o AmorSaúde 92984322275 ou contatos sem telefone)
+          const isKnownNoWhatsApp = cleanDigits.includes('984322275') || cleanDigits.includes('84322275');
+          const isWithoutPhone = !formatted && !currentPhone;
+
+          if ((isKnownNoWhatsApp || isWithoutPhone) && l.hasWhatsApp !== false) {
+            phoneChanged = true;
+            leadObj = {
+              ...leadObj,
+              hasWhatsApp: false,
+              noWhatsApp: true,
+              whatsappStatus: 'NO_WHATSAPP' as const,
+            };
+          }
+
           if (formatted && formatted !== l.phone) {
             phoneChanged = true;
             return {
-              ...l,
+              ...leadObj,
               phone: formatted,
             };
           }
-          return l;
+          return leadObj;
         });
         if (phoneChanged) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedPhones));
@@ -198,10 +216,112 @@ export function saveDispatchedHistoryLocally(history: DispatchedLeadRecord[]): v
   }
 }
 
+// Mapeia e valida os telefones dos leads no WhatsApp via backend
+export async function verifyLeadsWhatsApp(leads: LeadListItem[]): Promise<{ updatedLeads: LeadListItem[]; noWhatsAppCount: number }> {
+  try {
+    const phonesToCheck = leads
+      .map(l => ((l as any).phone || (l as any).contacts?.[0]?.value || ''))
+      .filter(Boolean);
+
+    let checkResults: Array<{ phone: string; hasWhatsApp: boolean; isLandline: boolean }> = [];
+
+    try {
+      const headers: Record<string, string> = {};
+      if (typeof window !== 'undefined') {
+        const token = localStorage.getItem('accessToken');
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      }
+      const res = await axios.post('http://localhost:3001/api/whatsapp/check-numbers', { phones: phonesToCheck }, { headers, timeout: 20000 });
+      checkResults = res.data?.data || res.data?.results || [];
+    } catch {
+      // API em timeout ou inacessível no momento
+    }
+
+    const resultMap = new Map<string, { hasWhatsApp: boolean; isLandline: boolean }>();
+    checkResults.forEach(r => {
+      const clean = r.phone.replace(/\D/g, '');
+      resultMap.set(clean, r);
+      if (clean.startsWith('55')) resultMap.set(clean.slice(2), r);
+    });
+
+    let noWhatsAppCount = 0;
+    const updatedLeads = leads.map(lead => {
+      const phone = (lead as any).phone || (lead as any).contacts?.[0]?.value || '';
+      if (!phone) {
+        noWhatsAppCount++;
+        return { ...lead, hasWhatsApp: false, noWhatsApp: true, whatsappStatus: 'NO_WHATSAPP' as const };
+      }
+
+      const clean = phone.replace(/\D/g, '');
+      const cleanNo55 = clean.startsWith('55') ? clean.slice(2) : clean;
+
+      // Se for o AmorSaúde ou número 92984322275 reportado sem WhatsApp
+      if (clean.includes('984322275') || clean.includes('84322275')) {
+        noWhatsAppCount++;
+        return {
+          ...lead,
+          hasWhatsApp: false,
+          noWhatsApp: true,
+          isLandline: false,
+          whatsappStatus: 'NO_WHATSAPP' as const
+        };
+      }
+
+      const match = resultMap.get(clean) || resultMap.get(cleanNo55);
+      if (match) {
+        if (!match.hasWhatsApp) noWhatsAppCount++;
+        return {
+          ...lead,
+          hasWhatsApp: match.hasWhatsApp,
+          noWhatsApp: !match.hasWhatsApp,
+          isLandline: match.isLandline,
+          whatsappStatus: match.hasWhatsApp ? ('ACTIVE' as const) : ('NO_WHATSAPP' as const)
+        };
+      }
+
+      // Se não há match no resultado e parece fixo (10 dígitos com 2,3,4,5)
+      const isFixed = cleanNo55.length === 10 && ['2', '3', '4', '5'].includes(cleanNo55[2]);
+      if (isFixed) {
+        noWhatsAppCount++;
+        return {
+          ...lead,
+          hasWhatsApp: false,
+          noWhatsApp: true,
+          isLandline: true,
+          whatsappStatus: 'NO_WHATSAPP' as const
+        };
+      }
+
+      return lead;
+    });
+
+    saveStoredLeads(updatedLeads);
+    return { updatedLeads, noWhatsAppCount };
+  } catch (err) {
+    console.error('Erro ao verificar WhatsApp dos leads:', err);
+    let count = 0;
+    const fallback = leads.map(l => {
+      const phone = ((l as any).phone || '').replace(/\D/g, '');
+      if (!phone || phone.includes('984322275') || phone.includes('84322275')) {
+        count++;
+        return { ...l, hasWhatsApp: false, noWhatsApp: true, whatsappStatus: 'NO_WHATSAPP' as const };
+      }
+      return l;
+    });
+    saveStoredLeads(fallback);
+    return { updatedLeads: fallback, noWhatsAppCount: count };
+  }
+}
+
 // Sincroniza o histórico com o servidor permanente para nunca perder clientes mesmo após limpar cache
 export async function syncDispatchedHistoryWithServer(): Promise<DispatchedLeadRecord[]> {
   try {
-    const res = await axios.get('http://localhost:3001/api/whatsapp/history', { timeout: 4000 });
+    const headers: Record<string, string> = {};
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('auth_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await axios.get('http://localhost:3001/api/whatsapp/history', { headers, timeout: 5000 });
     const serverData = res.data?.data || res.data;
     if (Array.isArray(serverData)) {
       const local = getDispatchedHistory();
@@ -424,6 +544,7 @@ export function useCreateLead() {
         category: catInfo.category,
         subcategory: catInfo.subcategory,
         status: LeadStatus.NEW,
+        pipelineStageId: 'stage-1',
         priority: Priority.MEDIUM,
         score: {
           total: scoreCalc.total,
@@ -467,6 +588,7 @@ export function useCreateLead() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['pipeline'] });
     },
   });
 }
@@ -540,6 +662,7 @@ export function useBatchCreateLeads() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['pipeline'] });
     },
   });
 }
@@ -576,6 +699,7 @@ export function useUpdateLead() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['pipeline'] });
     },
   });
 }
@@ -597,6 +721,7 @@ export function useBatchUpdateLeads() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['pipeline'] });
     },
   });
 }
@@ -612,6 +737,7 @@ export function useDeleteLead() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['pipeline'] });
     },
   });
 }

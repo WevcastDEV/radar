@@ -1,3 +1,4 @@
+import './env';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
@@ -12,8 +13,19 @@ async function bootstrap() {
   
   app.setGlobalPrefix('api');
   
-  app.use(helmet());
-  app.enableCors({ origin: ['http://localhost:3000', 'http://127.0.0.1:3000'] });
+  app.use(helmet({ crossOriginResourcePolicy: false, contentSecurityPolicy: false }));
+  app.use((req: any, res: any, next: any) => {
+    if (req.headers['access-control-request-private-network']) {
+      res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    }
+    next();
+  });
+  app.enableCors({
+    origin: true,
+    credentials: true,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Content-Type,Accept,Authorization,x-device-id,access-control-request-private-network',
+  });
   app.use(json({ limit: '8mb' }));
   app.use(urlencoded({ limit: '8mb', extended: true }));
   
@@ -31,7 +43,7 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   const port = process.env.API_PORT || 3001;
-  await app.listen(port, '127.0.0.1');
+  await app.listen(port, '0.0.0.0');
   console.log(`Application is running on: ${await app.getUrl()}`);
 }
 bootstrap();

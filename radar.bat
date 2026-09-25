@@ -43,16 +43,19 @@ echo ======================================================
 echo   INICIANDO RADAR DE OPORTUNIDADES + ROBO WHATSAPP
 echo ======================================================
 echo.
-echo [1/3] Iniciando Servidor Backend e Robo do WhatsApp...
-start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor e WhatsApp... && npm run start:dev"
+echo Liberando portas 3000 e 3001 caso estejam em uso...
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 3000, 3001 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>&1
+
+echo [1/3] Iniciando Servidor Backend e Robo do WhatsApp (Banco SQLite Local)...
+start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor e WhatsApp... && node dist/main.js"
 echo       OK - Terminal do WhatsApp aberto!
 
 echo [2/3] Iniciando Painel Web Otimizado (Modo Turbo)...
 start "Radar - Painel Web" cmd /k "cd /d ""%~dp0apps\web"" && title Radar - Painel Web && echo Iniciando Painel Web... && npm run start"
 echo       OK - Terminal do Painel Web aberto!
 
-echo [3/3] Aguardando inicializacao dos servidores...
-timeout /t 6 /nobreak >nul
+echo [3/3] Aguardando inicializacao completa dos servidores (API e Painel Web)...
+powershell -NoProfile -Command "$ready = $false; for ($i = 0; $i -lt 40; $i++) { try { $r1 = (Invoke-WebRequest -Uri 'http://localhost:3000/login' -UseBasicParsing -TimeoutSec 1).StatusCode; $r2 = (Invoke-WebRequest -Uri 'http://localhost:3001/api/health' -UseBasicParsing -TimeoutSec 1).StatusCode; if ($r1 -eq 200 -and $r2 -eq 200) { $ready = $true; break } } catch {}; Start-Sleep -Milliseconds 700 }; if ($ready) { Write-Host '      [OK] Servidores 100% prontos e conectados!' -ForegroundColor Green } else { Write-Host '      [!] Abrindo navegador...' -ForegroundColor Yellow }"
 
 echo ======================================================
 echo   SISTEMA INICIADO COM SUCESSO!
@@ -82,7 +85,7 @@ goto MENU
 :API
 echo.
 echo Iniciando Servidor e Robo do WhatsApp...
-start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && npm run start:dev"
+start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor e WhatsApp... && node dist/main.js"
 echo OK - Terminal aberto.
 echo.
 pause
@@ -91,9 +94,9 @@ goto MENU
 :STOP_ALL
 echo.
 echo Encerrando servicos...
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 3000, 3001 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>&1
 taskkill /f /fi "WINDOWTITLE eq Radar - API*" >nul 2>&1
 taskkill /f /fi "WINDOWTITLE eq Radar - Painel*" >nul 2>&1
-REM Nao encerrar outros processos Node.js do computador.
 echo OK - Todos os servicos foram encerrados.
 echo.
 pause

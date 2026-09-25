@@ -5,7 +5,16 @@ const path = require('path');
 let win;
 function createWindow() {
   win = new BrowserWindow({ width: 1440, height: 900, minWidth: 1100, minHeight: 700, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false } });
-  win.loadURL(process.env.RADAR_WEB_URL || 'http://localhost:3000/login');
+  const targetUrl = process.env.RADAR_WEB_URL || 'http://localhost:3000/login';
+  const loadWithRetry = () => {
+    win.loadURL(targetUrl).catch(() => {
+      setTimeout(loadWithRetry, 1500);
+    });
+  };
+  win.webContents.on('did-fail-load', () => {
+    setTimeout(loadWithRetry, 1500);
+  });
+  loadWithRetry();
 }
 app.whenReady().then(() => {
   createWindow();

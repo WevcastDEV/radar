@@ -20,7 +20,7 @@
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
     "desktop:install": "npm install --prefix apps/desktop",
-    "desktop:dist": "npm run build --workspace apps/desktop",
+    "desktop:dist": "npm run dist --workspace apps/desktop",
     "clean": "turbo clean && rm -rf node_modules"
   },
   "devDependencies": {

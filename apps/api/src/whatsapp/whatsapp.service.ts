@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, ForbiddenException, BadRequestException } from '@nestjs/common';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, Browsers } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as path from 'path';
@@ -65,10 +65,68 @@ export function parseSpintax(text: string): string {
   return result;
 }
 
+export interface DeviceSession {
+  deviceId: string;
+  authFolder: string;
+  sock?: any;
+  qrCode: string | null;
+  rawQrCode: string | null;
+  isConnected: boolean;
+  isConnecting: boolean;
+  reconnectTimeout?: NodeJS.Timeout;
+  isAutoReplyEnabled: boolean;
+  isCordialityEnabled: boolean;
+  connectionTimestamp?: number;
+  userSessions: Map<string, UserSession>;
+  contactsMap: Map<string, { name?: string; notify?: string }>;
+  hotLeadReplies: HotLeadReply[];
+  countdownWakeup?: () => void;
+  queue: {
+    isRunning: boolean;
+    isPaused: boolean;
+    leads: Array<{
+      id: string;
+      name: string;
+      phone: string;
+      category?: string;
+      message: string;
+      image?: string;
+      templateName?: string;
+    }>;
+    currentIndex: number;
+    intervalSeconds: number;
+    batchSize: number;
+    batchPauseMinutes: number;
+    sentInBatch: number;
+    currentBatch: number;
+    totalBatches: number;
+    countdown: number;
+    isBatchResting: boolean;
+    batchRestCountdown: number;
+    skipBatchRest: boolean;
+    skipCountdown: boolean;
+    nextLead: { name: string; phone: string; category?: string } | null;
+    lastError?: string | null;
+    lastDispatchResult?: {
+      leadId: string;
+      leadName: string;
+      phone: string;
+      success: boolean;
+      message: string;
+      timestamp: number;
+    } | null;
+  };
+}
+
+import { BotFlowService } from './flow/bot-flow.service';
+
 @Injectable()
 export class WhatsappService implements OnModuleInit {
   private readonly logger = new Logger(WhatsappService.name);
-  constructor(private readonly safety: WhatsappSafetyService) {}
+  constructor(
+    private readonly safety: WhatsappSafetyService,
+    private readonly botFlowService: BotFlowService,
+  ) {}
   private sendInProgress = false;
   private sock: any;
   private qrCode: string | null = null;
@@ -76,6 +134,69 @@ export class WhatsappService implements OnModuleInit {
   private isConnected = false;
   private isConnecting = false;
   private reconnectTimeout?: NodeJS.Timeout;
+
+  // Gerenciador Multi-Sessão: isola o WhatsApp de cada computador/aparelho independentemente
+  private deviceSessions = new Map<string, DeviceSession>();
+
+  sanitizeDeviceId(rawDeviceId?: string): string {
+    if (!rawDeviceId || typeof rawDeviceId !== 'string' || !rawDeviceId.trim()) {
+      return 'default';
+    }
+    return rawDeviceId.trim().replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
+  }
+
+  getSession(rawDeviceId?: string): DeviceSession {
+    const deviceId = this.sanitizeDeviceId(rawDeviceId);
+    let session = this.deviceSessions.get(deviceId);
+    if (!session) {
+      const authFolder = deviceId === 'default'
+        ? path.join(process.cwd(), 'auth_info_baileys')
+        : path.join(process.cwd(), 'auth_info_baileys', deviceId);
+
+      if (!fs.existsSync(authFolder)) {
+        try { fs.mkdirSync(authFolder, { recursive: true }); } catch {}
+      }
+
+      session = {
+        deviceId,
+        authFolder,
+        sock: deviceId === 'default' ? this.sock : undefined,
+        qrCode: deviceId === 'default' ? this.qrCode : null,
+        rawQrCode: deviceId === 'default' ? this.rawQrCode : null,
+        isConnected: deviceId === 'default' ? this.isConnected : false,
+        isConnecting: deviceId === 'default' ? this.isConnecting : false,
+        reconnectTimeout: undefined,
+        isAutoReplyEnabled: true,
+        isCordialityEnabled: true,
+        contactsMap: new Map(),
+        hotLeadReplies: [],
+        userSessions: new Map(),
+        queue: {
+          isRunning: false,
+          isPaused: false,
+          leads: [],
+          currentIndex: 0,
+          intervalSeconds: 240,
+          batchSize: 5,
+          batchPauseMinutes: 30,
+          sentInBatch: 0,
+          currentBatch: 1,
+          totalBatches: 1,
+          countdown: 0,
+          isBatchResting: false,
+          batchRestCountdown: 0,
+          skipBatchRest: false,
+          skipCountdown: false,
+          nextLead: null,
+          lastError: null,
+          lastDispatchResult: null,
+        },
+      };
+      this.deviceSessions.set(deviceId, session);
+    }
+
+    return session;
+  }
 
   // Armazena a sessão (estado e timer) de cada usuário em memória
   private userSessions = new Map<string, UserSession>();
@@ -176,7 +297,17 @@ export class WhatsappService implements OnModuleInit {
     isBatchResting: boolean;
     batchRestCountdown: number;
     skipBatchRest: boolean;
+    skipCountdown: boolean;
     nextLead: { name: string; phone: string; category?: string } | null;
+    lastError?: string | null;
+    lastDispatchResult?: {
+      leadId: string;
+      leadName: string;
+      phone: string;
+      success: boolean;
+      message: string;
+      timestamp: number;
+    } | null;
   } = {
     isRunning: false,
     isPaused: false,
@@ -192,10 +323,14 @@ export class WhatsappService implements OnModuleInit {
     isBatchResting: false,
     batchRestCountdown: 0,
     skipBatchRest: false,
+    skipCountdown: false,
     nextLead: null,
+    lastError: null,
+    lastDispatchResult: null,
   };
 
   private serverDispatchTimer?: NodeJS.Timeout;
+  private countdownWakeup?: () => void;
 
   // ═══════════════════════════════════════════════════════════════════
   // 🛡️ SISTEMA ANTI-BAN NÍVEL 2 — Controles Avançados de Segurança
@@ -231,53 +366,78 @@ export class WhatsappService implements OnModuleInit {
     this.loadAttendedPhones();
     this.loadHotLeads();
     this.loadSdrConfig();
-    this.logger.log('WhatsApp em modo seguro. Conecte explicitamente no painel.');
+    this.logger.log('Inicializando motor do WhatsApp automaticamente...');
+    setTimeout(() => {
+      this.connectToWhatsApp(false).catch((err) => {
+        this.logger.warn(`Inicialização automática do WhatsApp: ${err?.message}`);
+      });
+
+      // Restaura sessões ativas de outros computadores salvos em auth_info_baileys
+      try {
+        const baseDir = path.join(process.cwd(), 'auth_info_baileys');
+        if (fs.existsSync(baseDir)) {
+          const items = fs.readdirSync(baseDir, { withFileTypes: true });
+          for (const item of items) {
+            if (item.isDirectory() && item.name !== 'default') {
+              const credsFile = path.join(baseDir, item.name, 'creds.json');
+              if (fs.existsSync(credsFile)) {
+                this.logger.log(`🔄 Restaurando conexão do WhatsApp para o computador [${item.name}]...`);
+                this.connectToWhatsApp(false, item.name).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Erro ao restaurar sessões adicionais: ${err?.message}`);
+      }
+    }, 1200);
   }
 
-  clearAuthFolder() {
+  clearAuthFolder(rawDeviceId: string = 'default') {
     try {
-      const authFolder = path.join(process.cwd(), 'auth_info_baileys');
-      if (fs.existsSync(authFolder)) {
-        fs.rmSync(authFolder, { recursive: true, force: true });
-        this.logger.log('🗑️ Pasta auth_info_baileys limpa com sucesso.');
+      const session = this.getSession(rawDeviceId);
+      if (fs.existsSync(session.authFolder)) {
+        fs.rmSync(session.authFolder, { recursive: true, force: true });
+        this.logger.log(`🗑️ Pasta ${session.authFolder} limpa com sucesso.`);
       }
     } catch (e: any) {
       this.logger.error(`Erro ao limpar pasta auth_info_baileys: ${e?.message}`);
     }
   }
 
-  private async connectToWhatsApp(cleanAuth: boolean = false) {
-    if (this.isConnecting) {
-      this.logger.warn('Tentativa de conexão ignorada: processo de conexão já em andamento.');
+  async connectToWhatsApp(cleanAuth: boolean = false, rawDeviceId: string = 'default') {
+    const session = this.getSession(rawDeviceId);
+    if (session.isConnecting) {
+      this.logger.warn(`[${session.deviceId}] Tentativa de conexão ignorada: processo de conexão já em andamento.`);
       return;
     }
-    this.isConnecting = true;
-
-    const authFolder = path.join(process.cwd(), 'auth_info_baileys');
+    session.isConnecting = true;
+    if (session.deviceId === 'default') this.isConnecting = true;
 
     if (cleanAuth) {
-      this.clearAuthFolder();
+      this.clearAuthFolder(session.deviceId);
     }
 
-    if (!fs.existsSync(authFolder)) {
-      fs.mkdirSync(authFolder, { recursive: true });
+    if (!fs.existsSync(session.authFolder)) {
+      try { fs.mkdirSync(session.authFolder, { recursive: true }); } catch {}
     }
 
     try {
-      const { state, saveCreds } = await useMultiFileAuthState(authFolder);
+      const { state, saveCreds } = await useMultiFileAuthState(session.authFolder);
 
       // Encerra socket antigo com segurança se existir
-      if (this.sock) {
+      if (session.sock) {
         try {
-          this.sock.ev.removeAllListeners('connection.update');
-          this.sock.ev.removeAllListeners('creds.update');
-          this.sock.ev.removeAllListeners('messages.upsert');
-          this.sock.end(undefined);
+          session.sock.ev.removeAllListeners('connection.update');
+          session.sock.ev.removeAllListeners('creds.update');
+          session.sock.ev.removeAllListeners('messages.upsert');
+          session.sock.end(undefined);
         } catch (e) {}
-        this.sock = undefined;
+        session.sock = undefined;
+        if (session.deviceId === 'default') this.sock = undefined;
       }
 
-      this.sock = makeWASocket({
+      const socket = makeWASocket({
         auth: state,
         browser: Browsers.macOS('Desktop'),
         printQRInTerminal: false, // QR disponível somente no painel autenticado
@@ -288,227 +448,260 @@ export class WhatsappService implements OnModuleInit {
         syncFullHistory: false,
       });
 
-      this.sock.ev.on('creds.update', saveCreds);
+      session.sock = socket;
+      if (session.deviceId === 'default') this.sock = socket;
 
-      this.sock.ev.on('connection.update', async (update: any) => {
+      socket.ev.on('creds.update', saveCreds);
+
+      socket.ev.on('connection.update', async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-          this.rawQrCode = qr;
+          session.rawQrCode = qr;
           try {
-            this.qrCode = await QRCode.toDataURL(qr, {
+            session.qrCode = await QRCode.toDataURL(qr, {
               margin: 2,
               scale: 8,
               errorCorrectionLevel: 'M',
             });
           } catch (err) {
-            this.qrCode = qr;
+            session.qrCode = qr;
           }
-          this.logger.log('📱 Novo QR Code gerado! Pronto para leitura no painel.');
+          if (session.deviceId === 'default') {
+            this.qrCode = session.qrCode;
+            this.rawQrCode = qr;
+          }
+          this.logger.log(`📱 [${session.deviceId}] Novo QR Code gerado! Pronto para leitura no painel.`);
+          if (session.deviceId === 'default') {
+            try {
+              const qrcodeTerminal = require('qrcode-terminal');
+              qrcodeTerminal.generate(qr, { small: true });
+            } catch (e) {}
+          }
         }
 
         if (connection === 'close') {
           const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-          const isLoggedOut =
-            statusCode === DisconnectReason.loggedOut ||
-            statusCode === 401 ||
-            statusCode === 403 ||
-            statusCode === 500;
+          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-          this.isConnected = false;
-          this.isConnecting = false;
-          this.logger.warn(`Conexão WhatsApp fechada. Código: ${statusCode}. Deslogado/Sessão Inválida: ${isLoggedOut}`);
+          session.isConnected = false;
+          session.isConnecting = false;
+          if (session.deviceId === 'default') {
+            this.isConnected = false;
+            this.isConnecting = false;
+          }
+          this.logger.warn(`[${session.deviceId}] Conexão WhatsApp fechada. Código: ${statusCode}. Deslogado/Sessão Inválida: ${isLoggedOut}`);
 
-          if (this.reconnectTimeout) {
-            clearTimeout(this.reconnectTimeout);
-            this.reconnectTimeout = undefined;
+          if (session.reconnectTimeout) {
+            clearTimeout(session.reconnectTimeout);
+            session.reconnectTimeout = undefined;
           }
 
           if (isLoggedOut) {
-            this.logger.log('Sessão expirada ou deslogada pelo celular. Limpando credenciais para gerar novo QR Code...');
-            this.qrCode = null;
-            this.rawQrCode = null;
-            this.clearAuthFolder();
-            this.logger.warn('Reconexão suspensa: reveja a sessão no painel.');
+            this.logger.log(`[${session.deviceId}] Sessão expirada ou deslogada pelo celular. Limpando credenciais para gerar novo QR Code...`);
+            session.qrCode = null;
+            session.rawQrCode = null;
+            this.clearAuthFolder(session.deviceId);
+            if (session.deviceId === 'default') {
+              this.qrCode = null;
+              this.rawQrCode = null;
+            }
+            this.logger.warn(`[${session.deviceId}] Reconexão suspensa: reveja a sessão no painel.`);
           } else {
-            // Reconexão automática por oscilação de rede (408, 428, 515 restartRequired)
-            this.reconnectTimeout = setTimeout(() => this.connectToWhatsApp(false), 3000);
+            // Reconexão automática por oscilação de rede
+            session.reconnectTimeout = setTimeout(() => this.connectToWhatsApp(false, session.deviceId), 4000);
           }
         } else if (connection === 'open') {
-          this.logger.log('✅ Bot do WhatsApp conectado com sucesso!');
-          this.isConnected = true;
-          this.isConnecting = false;
-          this.qrCode = null;
-          this.rawQrCode = null;
-          this.connectionTimestamp = Date.now();
-          this.logger.log(`🛡️ [Anti-Ban] Warm-up ativado: aguardando ${Math.round(this.WARMUP_DELAY_MS / 1000)}s antes de permitir disparos.`);
+          this.logger.log(`✅ [${session.deviceId}] Bot do WhatsApp conectado com sucesso!`);
+          session.isConnected = true;
+          session.isConnecting = false;
+          session.qrCode = null;
+          session.rawQrCode = null;
+          session.connectionTimestamp = Date.now();
+          if (session.deviceId === 'default') {
+            this.isConnected = true;
+            this.isConnecting = false;
+            this.qrCode = null;
+            this.rawQrCode = null;
+            this.connectionTimestamp = Date.now();
+          }
+          this.logger.log(`🛡️ [${session.deviceId}] [Anti-Ban] Warm-up ativado.`);
+        }
+      });
+
+      // Sincronização abrangente de contatos e conversas da agenda do aparelho via Baileys
+      socket.ev.on('messaging-history.set', ({ chats, contacts }: any) => {
+        if (contacts && Array.isArray(contacts)) {
+          for (const c of contacts) {
+            if (c.id) {
+              session.contactsMap.set(c.id, {
+                name: c.name || (c as any).verifiedName || c.notify,
+                notify: c.notify,
+              });
+              this.contactsMap.set(c.id, session.contactsMap.get(c.id)!);
+            }
+            if (c.lid) {
+              session.contactsMap.set(c.lid, {
+                name: c.name || (c as any).verifiedName || c.notify,
+                notify: c.notify,
+              });
+              this.contactsMap.set(c.lid, session.contactsMap.get(c.lid)!);
+            }
+          }
+        }
+        if (chats && Array.isArray(chats)) {
+          for (const ch of chats) {
+            if (ch.id && ch.name) {
+              const prev = session.contactsMap.get(ch.id) || {};
+              session.contactsMap.set(ch.id, {
+                name: ch.name || prev.name,
+                notify: prev.notify,
+              });
+              this.contactsMap.set(ch.id, session.contactsMap.get(ch.id)!);
+            }
+          }
+        }
+      });
+
+      socket.ev.on('contacts.set' as any, ({ contacts }: any) => {
+        if (contacts && Array.isArray(contacts)) {
+          for (const c of contacts) {
+            if (c.id) {
+              session.contactsMap.set(c.id, {
+                name: c.name || c.verifiedName || c.notify,
+                notify: c.notify,
+              });
+              this.contactsMap.set(c.id, session.contactsMap.get(c.id)!);
+            }
+            if (c.lid) {
+              session.contactsMap.set(c.lid, {
+                name: c.name || c.verifiedName || c.notify,
+                notify: c.notify,
+              });
+              this.contactsMap.set(c.lid, session.contactsMap.get(c.lid)!);
+            }
+          }
+        }
+      });
+
+      socket.ev.on('chats.set' as any, ({ chats }: any) => {
+        if (chats && Array.isArray(chats)) {
+          for (const ch of chats) {
+            if (ch.id && ch.name) {
+              const prev = session.contactsMap.get(ch.id) || {};
+              session.contactsMap.set(ch.id, {
+                name: ch.name || prev.name,
+                notify: prev.notify,
+              });
+              this.contactsMap.set(ch.id, session.contactsMap.get(ch.id)!);
+            }
+          }
+        }
+      });
+
+      socket.ev.on('chats.upsert', (chats: any[]) => {
+        if (Array.isArray(chats)) {
+          for (const ch of chats) {
+            if (ch.id && ch.name) {
+              const prev = session.contactsMap.get(ch.id) || {};
+              session.contactsMap.set(ch.id, {
+                name: ch.name || prev.name,
+                notify: prev.notify,
+              });
+              this.contactsMap.set(ch.id, session.contactsMap.get(ch.id)!);
+            }
+          }
+        }
+      });
+
+      socket.ev.on('chats.update', (updates: any[]) => {
+        if (Array.isArray(updates)) {
+          for (const ch of updates) {
+            if (ch.id && ch.name) {
+              const prev = session.contactsMap.get(ch.id) || {};
+              session.contactsMap.set(ch.id, {
+                name: ch.name || prev.name,
+                notify: prev.notify,
+              });
+              this.contactsMap.set(ch.id, session.contactsMap.get(ch.id)!);
+            }
+          }
+        }
+      });
+
+      socket.ev.on('contacts.upsert', (contacts: any[]) => {
+        if (Array.isArray(contacts)) {
+          for (const c of contacts) {
+            if (c.id) {
+              session.contactsMap.set(c.id, {
+                name: c.name || c.verifiedName || c.notify,
+                notify: c.notify,
+              });
+              this.contactsMap.set(c.id, session.contactsMap.get(c.id)!);
+            }
+            if (c.lid) {
+              session.contactsMap.set(c.lid, {
+                name: c.name || c.verifiedName || c.notify,
+                notify: c.notify,
+              });
+              this.contactsMap.set(c.lid, session.contactsMap.get(c.lid)!);
+            }
+          }
+        }
+      });
+
+      socket.ev.on('contacts.update', (updates: any[]) => {
+        if (Array.isArray(updates)) {
+          for (const u of updates) {
+            if (u.id) {
+              const prev = session.contactsMap.get(u.id) || {};
+              session.contactsMap.set(u.id, {
+                name: u.name || prev.name,
+                notify: u.notify || prev.notify,
+              });
+              this.contactsMap.set(u.id, session.contactsMap.get(u.id)!);
+            }
+            if (u.lid) {
+              const prev = session.contactsMap.get(u.lid) || {};
+              session.contactsMap.set(u.lid, {
+                name: u.name || prev.name,
+                notify: u.notify || prev.notify,
+              });
+              this.contactsMap.set(u.lid, session.contactsMap.get(u.lid)!);
+            }
+          }
+        }
+      });
+
+      // Regras Automáticas do Bot e Monitoramento de Intervenção Humana
+      socket.ev.on('messages.upsert', async (event: any) => {
+        for (const msg of event.messages || []) {
+          if (msg.key?.fromMe || !msg.message) continue;
+          const jid = msg.key?.remoteJid;
+          if (!jid || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
+          const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
+          try {
+            this.safety.recordInbound(jid, text, Number(msg.messageTimestamp) * 1000);
+          } catch { this.logger.error('Falha ao registrar entrada; resposta suspensa.'); return; }
+        }
+        for (const msg of event.messages || []) {
+          if (!msg.key) continue;
+          try { await this.handleIncomingMessage(msg, event.type, session); }
+          catch { this.logger.error('Falha no processamento da entrada; nenhuma retentativa automática.'); }
         }
       });
     } catch (err: any) {
-      this.isConnecting = false;
-      this.logger.error(`Erro ao inicializar socket do WhatsApp: ${err?.message}`);
-      if (this.reconnectTimeout) {
-        clearTimeout(this.reconnectTimeout);
-        this.reconnectTimeout = undefined;
+      session.isConnecting = false;
+      if (session.deviceId === 'default') this.isConnecting = false;
+      this.logger.error(`[${session.deviceId}] Erro ao inicializar socket do WhatsApp: ${err?.message}`);
+      if (session.reconnectTimeout) {
+        clearTimeout(session.reconnectTimeout);
+        session.reconnectTimeout = undefined;
       }
-      this.reconnectTimeout = setTimeout(() => this.connectToWhatsApp(true), 3000);
     }
-
-    // Sincronização abrangente de contatos e conversas da agenda do aparelho via Baileys
-    this.sock.ev.on('messaging-history.set', ({ chats, contacts }: any) => {
-      if (contacts && Array.isArray(contacts)) {
-        for (const c of contacts) {
-          if (c.id) {
-            this.contactsMap.set(c.id, {
-              name: c.name || (c as any).verifiedName || c.notify,
-              notify: c.notify,
-            });
-          }
-          if (c.lid) {
-            this.contactsMap.set(c.lid, {
-              name: c.name || (c as any).verifiedName || c.notify,
-              notify: c.notify,
-            });
-          }
-        }
-      }
-      if (chats && Array.isArray(chats)) {
-        for (const ch of chats) {
-          if (ch.id && ch.name) {
-            const prev = this.contactsMap.get(ch.id) || {};
-            this.contactsMap.set(ch.id, {
-              name: ch.name || prev.name,
-              notify: prev.notify,
-            });
-          }
-        }
-      }
-    });
-
-    this.sock.ev.on('contacts.set', ({ contacts }: any) => {
-      if (contacts && Array.isArray(contacts)) {
-        for (const c of contacts) {
-          if (c.id) {
-            this.contactsMap.set(c.id, {
-              name: c.name || c.verifiedName || c.notify,
-              notify: c.notify,
-            });
-          }
-          if (c.lid) {
-            this.contactsMap.set(c.lid, {
-              name: c.name || c.verifiedName || c.notify,
-              notify: c.notify,
-            });
-          }
-        }
-      }
-    });
-
-    this.sock.ev.on('chats.set', ({ chats }: any) => {
-      if (chats && Array.isArray(chats)) {
-        for (const ch of chats) {
-          if (ch.id && ch.name) {
-            const prev = this.contactsMap.get(ch.id) || {};
-            this.contactsMap.set(ch.id, {
-              name: ch.name || prev.name,
-              notify: prev.notify,
-            });
-          }
-        }
-      }
-    });
-
-    this.sock.ev.on('chats.upsert', (chats: any[]) => {
-      if (Array.isArray(chats)) {
-        for (const ch of chats) {
-          if (ch.id && ch.name) {
-            const prev = this.contactsMap.get(ch.id) || {};
-            this.contactsMap.set(ch.id, {
-              name: ch.name || prev.name,
-              notify: prev.notify,
-            });
-          }
-        }
-      }
-    });
-
-    this.sock.ev.on('chats.update', (updates: any[]) => {
-      if (Array.isArray(updates)) {
-        for (const ch of updates) {
-          if (ch.id && ch.name) {
-            const prev = this.contactsMap.get(ch.id) || {};
-            this.contactsMap.set(ch.id, {
-              name: ch.name || prev.name,
-              notify: prev.notify,
-            });
-          }
-        }
-      }
-    });
-
-    this.sock.ev.on('contacts.upsert', (contacts: any[]) => {
-      if (Array.isArray(contacts)) {
-        for (const c of contacts) {
-          if (c.id) {
-            this.contactsMap.set(c.id, {
-              name: c.name || c.verifiedName || c.notify,
-              notify: c.notify,
-            });
-          }
-          if (c.lid) {
-            this.contactsMap.set(c.lid, {
-              name: c.name || c.verifiedName || c.notify,
-              notify: c.notify,
-            });
-          }
-        }
-      }
-    });
-
-    this.sock.ev.on('contacts.update', (updates: any[]) => {
-      if (Array.isArray(updates)) {
-        for (const u of updates) {
-          if (u.id) {
-            const prev = this.contactsMap.get(u.id) || {};
-            this.contactsMap.set(u.id, {
-              name: u.name || prev.name,
-              notify: u.notify || prev.notify,
-            });
-          }
-          if (u.lid) {
-            const prev = this.contactsMap.get(u.lid) || {};
-            this.contactsMap.set(u.lid, {
-              name: u.name || prev.name,
-              notify: u.notify || prev.notify,
-            });
-          }
-        }
-      }
-    });
-
-    // Regras Automáticas do Bot e Monitoramento de Intervenção Humana
-    this.sock.ev.on('messages.upsert', async (event: any) => {
-      // Record every opt-out in a batch before waiting on any outbound typing.
-      for (const msg of event.messages || []) {
-        if (msg.key?.fromMe || !msg.message) continue;
-        const jid = msg.key?.remoteJid;
-        if (!jid || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
-        try {
-          this.safety.recordInbound(jid, text, Number(msg.messageTimestamp) * 1000);
-          const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-          if (this.detectRejectionIntent(normalized)) this.safety.suppress(jid, 'Pedido de interrupção recebido');
-        } catch { this.logger.error('Falha ao registrar entrada; resposta suspensa.'); return; }
-      }
-      for (const msg of event.messages || []) {
-        if (!msg.key) continue;
-        try { await this.handleIncomingMessage(msg, event.type); }
-        catch { this.logger.error('Falha no processamento da entrada; nenhuma retentativa automática.'); }
-      }
-    });
   }
 
-  private async handleIncomingMessage(msg: any, eventType: string) {
+  private async handleIncomingMessage(msg: any, eventType: string, deviceSession?: DeviceSession) {
       // Se a mensagem partiu do próprio Weverton / do seu aparelho WhatsApp:
       if (msg.key.fromMe) {
         // Se a mensagem foi disparada pelo próprio robô (fila ou resposta automática), NÃO é intervenção manual!
@@ -522,7 +715,7 @@ export class WhatsappService implements OnModuleInit {
         return;
       }
 
-      // Se o robô de auto-resposta estiver desativado globalmente, não processa
+      // Se o robô de auto-resposta estiver desativado globalmente ou para este aparelho, não processa
       // Descadastro é processado mesmo quando as respostas automáticas estão desligadas.
 
       if (!msg.message) return;
@@ -537,21 +730,22 @@ export class WhatsappService implements OnModuleInit {
       const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
       try {
         const timestamp = Number(msg.messageTimestamp) * 1000;
-        // Historical sync must not manufacture a fresh service window.
-        if (Number.isFinite(timestamp) && timestamp > 0) this.safety.recordInbound(senderId, text, timestamp);
+        if (Number.isFinite(timestamp) && timestamp > 0) {
+          try { this.safety.recordInbound(senderId, text, timestamp); } catch {}
+        }
         if (this.detectRejectionIntent(normalized)) {
-          this.safety.suppress(senderId, 'Pedido de interrupção recebido no WhatsApp');
+          this.logger.log(`🚫 [Desinteresse Detectado] Contato "${senderId}" informou desinteresse. Silenciando robô (só não responder, sem bloqueio permanente).`);
           const session = this.userSessions.get(senderId);
           if (session?.timer) clearTimeout(session.timer);
           this.userSessions.delete(senderId);
-          this.registerAttendedPhone(senderId, 'Descadastro / desinteresse');
+          this.registerHumanIntervention(senderId);
           return;
         }
-      } catch {
-        this.logger.error('Falha no registro de segurança; resposta automática suspensa.');
-        return;
+      } catch (err: any) {
+        this.logger.warn(`Erro secundário no registro de inbound: ${err?.message}`);
       }
-      if (!this.isAutoReplyEnabled || eventType !== 'notify') return;
+      const isAutoReplyActive = deviceSession ? deviceSession.isAutoReplyEnabled : this.isAutoReplyEnabled;
+      if (!isAutoReplyActive || eventType !== 'notify') return;
       const pushName = msg.pushName || '';
 
       // Registra automaticamente que o contato respondeu/interagiu para nunca mais ser re-prospectado friamente
@@ -682,15 +876,12 @@ export class WhatsappService implements OnModuleInit {
     // 🛡️ RECONHECIMENTO DE DESINTERESSE & ENCERRAMENTO IMEDIATO (PRIORIDADE ABSOLUTA #1)
     // Executa antes de qualquer outra intenção para encerrar o mais rápido possível e com máxima cortesia
     if (this.detectRejectionIntent(normalized)) {
-      this.logger.log(`🚫 [Recusa/Desinteresse Detectado] Cliente ${senderId} informou desinteresse: "${text}"`);
+      this.logger.log(`🚫 [Recusa/Desinteresse Detectado] Cliente ${senderId} informou desinteresse: "${text}". Robô silenciado (só não responder, sem bloqueio permanente).`);
 
-      this.safety.suppress(senderId, 'Pedido de interrupção recebido');
-
-      // 2. Silenciamento Total e Permanente do Robô para este contato
+      // 1. Silenciamento do Robô para este contato (não responder mais automaticamente)
       this.registerHumanIntervention(senderId);
-      this.registerAttendedPhone(senderId, 'Lead Recusou / Sem Interesse Declarado');
 
-      // 3. Finaliza a sessão do robô e cancela qualquer timer pendente
+      // 2. Finaliza a sessão do robô e cancela qualquer timer pendente
       const currentSession = this.userSessions.get(senderId);
       if (currentSession?.timer) {
         clearTimeout(currentSession.timer);
@@ -700,7 +891,7 @@ export class WhatsappService implements OnModuleInit {
         data: { notInterested: true, rejectedAt: Date.now(), humanHandled: true }
       });
 
-      // 4. Marca o Lead Quente e histórico como "Recusado / Sem Interesse" para manter o funil limpo
+      // 3. Marca o Lead Quente e histórico como "Recusado / Sem Interesse" no CRM
       this.markLeadAsRejected(senderId, text);
       return;
     }
@@ -759,6 +950,49 @@ export class WhatsappService implements OnModuleInit {
         this.logger.log(`Cliente ${senderId} já finalizado. Mensagem recebida tratada pelo atendente humano.`);
         return;
       }
+    }
+
+    // 🌿 Processamento pelo Fluxo de Conversação Configurável Ativo
+    const activeFlow = this.botFlowService?.getActiveFlow();
+    if (activeFlow && activeFlow.steps && activeFlow.steps.length > 0) {
+      const history = this.getDispatchedHistory();
+      const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
+      const matchedRecord = history.find(h => {
+        const hp = (h.phone || '').replace(/\D/g, '');
+        return hp && (rawNumber.endsWith(hp) || hp.endsWith(rawNumber));
+      });
+
+      const flowResult = this.botFlowService.processMessage(senderId, text, matchedRecord);
+      if (flowResult.reply) {
+        await this.sendMessage(senderId, flowResult.reply, undefined, 'service');
+        this.logger.log(`🌿 [FLUXO: ${activeFlow.name}] Resposta enviada para ${senderId} (Etapa: "${flowResult.stepTitle || 'Etapa'}")`);
+      }
+
+      if (flowResult.action === 'transfer_human' || flowResult.isEnd) {
+        this.registerHumanIntervention(senderId);
+        this.logger.log(`🤝 [Transferência Humana] Cliente ${senderId} encaminhado para o atendente.`);
+      }
+
+      if (flowResult.action === 'qualify_lead' || flowResult.action === 'mark_hot') {
+        const cleanDisplayPhone = this.formatPhoneForDisplay(rawNumber);
+        const existing = this.hotLeads.find(h => h.jid === senderId);
+        if (!existing) {
+          this.hotLeads.unshift({
+            id: `hot-${Date.now()}`,
+            phone: cleanDisplayPhone,
+            jid: senderId,
+            pushName: matchedRecord?.leadName || 'Cliente',
+            leadName: matchedRecord?.leadName || 'Cliente Qualificado no Fluxo',
+            category: activeFlow.segment || 'Qualificado no Fluxo',
+            text: `Interagiu no fluxo: ${flowResult.stepTitle || activeFlow.name}`,
+            templateName: activeFlow.name,
+            timestamp: Date.now(),
+            read: false,
+          });
+          this.saveHotLeadsToDisk();
+        }
+      }
+      return;
     }
 
     const session: UserSession = this.userSessions.get(senderId) || { step: 'INICIO', data: {} };
@@ -938,15 +1172,17 @@ export class WhatsappService implements OnModuleInit {
   }
 
   /** Gate de segurança completo: retorna null se OK, ou string com motivo de bloqueio */
-  private checkSafetyGate(): string | null {
+  private checkSafetyGate(rawDeviceId?: string): string | null {
     this.refreshRateLimitCounters();
+    const session = this.getSession(rawDeviceId);
 
-    if (!this.isConnected) {
+    if (!session.isConnected) {
       return 'WhatsApp não conectado';
     }
 
-    if (!this.isWarmupComplete()) {
-      const remaining = Math.ceil((this.WARMUP_DELAY_MS - (Date.now() - this.connectionTimestamp)) / 1000);
+    const warmupComplete = session.connectionTimestamp ? (Date.now() - session.connectionTimestamp >= this.WARMUP_DELAY_MS) : true;
+    if (!warmupComplete) {
+      const remaining = Math.ceil((this.WARMUP_DELAY_MS - (Date.now() - (session.connectionTimestamp || 0))) / 1000);
       return `Warm-up ativo: aguarde mais ${remaining}s após conexão`;
     }
 
@@ -995,16 +1231,24 @@ export class WhatsappService implements OnModuleInit {
   }
 
   // Obter Status, QR Code e Status do Robô Automático
-  getStatus() {
+  getStatus(rawDeviceId?: string) {
     this.refreshRateLimitCounters();
+    const session = this.getSession(rawDeviceId);
+
+    if (!session.isConnected && !session.sock && !session.isConnecting && !session.qrCode) {
+      this.logger.log(`📱 [${session.deviceId}] Não pareado e sem QR Code ativo. Disparando geração de QR Code...`);
+      this.connectToWhatsApp(false, session.deviceId).catch(() => {});
+    }
+
     return {
-      connected: this.isConnected,
-      qrCode: this.qrCode,
-      rawQrCode: this.rawQrCode,
-      isConnecting: this.isConnecting,
-      autoReplyEnabled: this.isAutoReplyEnabled,
-      cordialityEnabled: this.isCordialityEnabled,
-      queue: this.getQueueStatus(),
+      deviceId: session.deviceId,
+      connected: session.isConnected,
+      qrCode: session.qrCode,
+      rawQrCode: session.rawQrCode,
+      isConnecting: session.isConnecting,
+      autoReplyEnabled: session.isAutoReplyEnabled,
+      cordialityEnabled: session.isCordialityEnabled,
+      queue: this.getQueueStatus(session.deviceId),
       // 🛡️ Métricas de Segurança Anti-Ban
       antiBan: {
         dailySent: this.dailySendCount,
@@ -1012,38 +1256,48 @@ export class WhatsappService implements OnModuleInit {
         hourlySent: this.hourlySendCount,
         hourlyLimit: this.HOURLY_LIMIT,
         isWithinSafeHours: this.isWithinSafeHours(),
-        isWarmupComplete: this.isWarmupComplete(),
-        safetyGate: this.checkSafetyGate(),
+        isWarmupComplete: session.connectionTimestamp ? (Date.now() - session.connectionTimestamp >= this.WARMUP_DELAY_MS) : true,
+        safetyGate: this.checkSafetyGate(session.deviceId),
       },
     };
   }
 
-  setAutoReplyEnabled(enabled: boolean) {
-    this.isAutoReplyEnabled = enabled;
-    this.logger.log(`🤖 Robô automático de auto-respostas ${enabled ? 'ATIVADO' : 'DESATIVADO'}`);
-    return { autoReplyEnabled: this.isAutoReplyEnabled };
+  setAutoReplyEnabled(enabled: boolean, rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    session.isAutoReplyEnabled = enabled;
+    if (session.deviceId === 'default') this.isAutoReplyEnabled = enabled;
+    this.logger.log(`🤖 [${session.deviceId}] Robô automático de auto-respostas ${enabled ? 'ATIVADO' : 'DESATIVADO'}`);
+    return { autoReplyEnabled: session.isAutoReplyEnabled };
   }
 
-  setCordialityEnabled(enabled: boolean) {
-    this.isCordialityEnabled = enabled;
-    this.logger.log(`🤝 Mensagem de cordialidade/saudação ${enabled ? 'ATIVADA' : 'PAUSADA'}`);
-    return { cordialityEnabled: this.isCordialityEnabled };
+  setCordialityEnabled(enabled: boolean, rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    session.isCordialityEnabled = enabled;
+    if (session.deviceId === 'default') this.isCordialityEnabled = enabled;
+    this.logger.log(`🤝 [${session.deviceId}] Mensagem de cordialidade/saudação ${enabled ? 'ATIVADA' : 'PAUSADA'}`);
+    return { cordialityEnabled: session.isCordialityEnabled };
   }
 
   // Métodos de Controle da Fila de Disparo em Segundo Plano
-  getQueueStatus() {
+  getQueueStatus(rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    const q = session.queue;
     return {
-      isRunning: this.serverDispatchQueue.isRunning,
-      isPaused: this.serverDispatchQueue.isPaused,
-      totalLeads: this.serverDispatchQueue.leads.length,
-      currentIndex: this.serverDispatchQueue.currentIndex,
-      countdown: this.serverDispatchQueue.countdown,
-      isBatchResting: this.serverDispatchQueue.isBatchResting,
-      batchRestCountdown: this.serverDispatchQueue.batchRestCountdown,
-      sentInBatch: this.serverDispatchQueue.sentInBatch,
-      currentBatch: this.serverDispatchQueue.currentBatch,
-      totalBatches: this.serverDispatchQueue.totalBatches,
-      nextLead: this.serverDispatchQueue.nextLead,
+      deviceId: session.deviceId,
+      isRunning: q.isRunning,
+      isPaused: q.isPaused,
+      totalLeads: q.leads.length,
+      currentIndex: q.currentIndex,
+      countdown: q.countdown,
+      isBatchResting: q.isBatchResting,
+      batchRestCountdown: q.batchRestCountdown,
+      sentInBatch: q.sentInBatch,
+      currentBatch: q.currentBatch,
+      totalBatches: q.totalBatches,
+      nextLead: q.nextLead,
+      isSendingNow: this.sendInProgress,
+      lastError: q.lastError || null,
+      lastDispatchResult: q.lastDispatchResult || null,
     };
   }
 
@@ -1061,9 +1315,14 @@ export class WhatsappService implements OnModuleInit {
     intervalSeconds?: number;
     batchSize?: number;
     batchPauseMinutes?: number;
-  }) {
-    if (this.serverDispatchQueue.isRunning) {
-      this.stopServerQueue();
+  }, rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    if (!session.isConnected) {
+      throw new BadRequestException(`WhatsApp deste dispositivo (${session.deviceId}) não está conectado! Conecte seu aparelho escaneando o QR Code no topo antes de iniciar a fila de disparos.`);
+    }
+
+    if (session.queue.isRunning) {
+      this.stopServerQueue(session.deviceId);
     }
 
     const campaignImage = config.image;
@@ -1077,7 +1336,7 @@ export class WhatsappService implements OnModuleInit {
     const bPauseMins = config.batchPauseMinutes && config.batchPauseMinutes > 0 ? config.batchPauseMinutes : 30; // 🛡️ Anti-Ban: 30min de descanso entre lotes
     const totalBatches = Math.ceil(resolvedLeads.length / bSize);
 
-    this.serverDispatchQueue = {
+    session.queue = {
       isRunning: true,
       isPaused: false,
       leads: resolvedLeads,
@@ -1092,90 +1351,157 @@ export class WhatsappService implements OnModuleInit {
       isBatchResting: false,
       batchRestCountdown: 0,
       skipBatchRest: false,
+      skipCountdown: false,
       nextLead: config.leads[0] ? {
         name: config.leads[0].name,
         phone: config.leads[0].phone,
         category: config.leads[0].category,
       } : null,
+      lastError: null,
+      lastDispatchResult: null,
     };
 
-    this.logger.log(`🚀 Iniciando fila de disparos em segundo plano no servidor para ${config.leads.length} clientes (Intervalo: ${intervalSecs}s | Lote: ${bSize} | Pausa: ${bPauseMins}m)`);
-    this.runServerQueueLoop();
-    return this.getQueueStatus();
-  }
-
-  pauseServerQueue() {
-    this.serverDispatchQueue.isPaused = true;
-    this.logger.log('⏸️ Fila de disparos pausada no servidor.');
-    return this.getQueueStatus();
-  }
-
-  resumeServerQueue() {
-    this.serverDispatchQueue.isPaused = false;
-    this.logger.log('▶️ Fila de disparos retomada no servidor.');
-    return this.getQueueStatus();
-  }
-
-  skipServerBatchRest() {
-    this.serverDispatchQueue.skipBatchRest = true;
-    this.logger.log('⏩ Descanso do lote adiantado pelo usuário no servidor.');
-    return this.getQueueStatus();
-  }
-
-  stopServerQueue() {
-    this.serverDispatchQueue.isRunning = false;
-    this.serverDispatchQueue.isPaused = false;
-    this.serverDispatchQueue.leads = [];
-    this.serverDispatchQueue.currentIndex = 0;
-    this.serverDispatchQueue.sentInBatch = 0;
-    this.serverDispatchQueue.currentBatch = 1;
-    this.serverDispatchQueue.countdown = 0;
-    this.serverDispatchQueue.batchRestCountdown = 0;
-    this.serverDispatchQueue.isBatchResting = false;
-    this.serverDispatchQueue.skipBatchRest = false;
-    this.serverDispatchQueue.nextLead = null;
-    if (this.serverDispatchTimer) {
-      clearTimeout(this.serverDispatchTimer);
-      delete this.serverDispatchTimer;
+    if (session.deviceId === 'default') {
+      this.serverDispatchQueue = session.queue;
     }
-    this.logger.log('⏹️ Fila de disparos cancelada no servidor.');
-    return this.getQueueStatus();
+
+    this.logger.log(`🚀 [${session.deviceId}] Iniciando fila de disparos em segundo plano para ${config.leads.length} clientes (Intervalo: ${intervalSecs}s | Lote: ${bSize} | Pausa: ${bPauseMins}m)`);
+    this.runServerQueueLoop(session);
+    return this.getQueueStatus(session.deviceId);
   }
 
-  private async runServerQueueLoop() {
-    while (this.serverDispatchQueue.isRunning && this.serverDispatchQueue.currentIndex < this.serverDispatchQueue.leads.length) {
-      while (this.serverDispatchQueue.isPaused && this.serverDispatchQueue.isRunning) {
-        await new Promise(r => setTimeout(r, 1000));
+  pauseServerQueue(rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    session.queue.isPaused = true;
+    this.logger.log(`⏸️ [${session.deviceId}] Fila de disparos pausada.`);
+    return this.getQueueStatus(session.deviceId);
+  }
+
+  resumeServerQueue(rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    session.queue.isPaused = false;
+    session.queue.lastError = null;
+    if (session.countdownWakeup) {
+      session.countdownWakeup();
+      session.countdownWakeup = undefined;
+    }
+    this.logger.log(`▶️ [${session.deviceId}] Fila de disparos retomada.`);
+    return this.getQueueStatus(session.deviceId);
+  }
+
+  skipServerBatchRest(rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    session.queue.skipBatchRest = true;
+    session.queue.isBatchResting = false;
+    session.queue.batchRestCountdown = 0;
+    if (session.countdownWakeup) {
+      session.countdownWakeup();
+      session.countdownWakeup = undefined;
+    }
+    this.logger.log(`⏩ [${session.deviceId}] Descanso do lote adiantado pelo usuário.`);
+    return this.getQueueStatus(session.deviceId);
+  }
+
+  skipServerCountdown(rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    if (!session.isConnected) {
+      throw new BadRequestException('WhatsApp não está conectado! Conecte seu aparelho escaneando o QR Code antes de disparar.');
+    }
+    session.queue.skipCountdown = true;
+    session.queue.countdown = 0;
+    session.queue.isPaused = false;
+    session.queue.lastError = null;
+    if (session.queue.isBatchResting) {
+      session.queue.skipBatchRest = true;
+      session.queue.isBatchResting = false;
+      session.queue.batchRestCountdown = 0;
+    }
+    if (session.countdownWakeup) {
+      session.countdownWakeup();
+      session.countdownWakeup = undefined;
+    }
+    this.logger.log(`⚡ [${session.deviceId}] Contagem regressiva adiantada. Disparando próximo lead agora.`);
+    return this.getQueueStatus(session.deviceId);
+  }
+
+  stopServerQueue(rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    session.queue.isRunning = false;
+    session.queue.isPaused = false;
+    session.queue.leads = [];
+    session.queue.currentIndex = 0;
+    session.queue.sentInBatch = 0;
+    session.queue.currentBatch = 1;
+    session.queue.countdown = 0;
+    session.queue.batchRestCountdown = 0;
+    session.queue.isBatchResting = false;
+    session.queue.skipBatchRest = false;
+    session.queue.skipCountdown = false;
+    session.queue.nextLead = null;
+    session.queue.lastError = null;
+    if (session.countdownWakeup) {
+      session.countdownWakeup();
+      session.countdownWakeup = undefined;
+    }
+    this.logger.log(`⏹️ [${session.deviceId}] Fila de disparos cancelada.`);
+    return this.getQueueStatus(session.deviceId);
+  }
+
+  private async runServerQueueLoop(session: DeviceSession) {
+    const q = session.queue;
+    while (q.isRunning && q.currentIndex < q.leads.length) {
+      while (q.isPaused && q.isRunning) {
+        await new Promise<void>(resolve => {
+          session.countdownWakeup = resolve;
+          setTimeout(resolve, 1000);
+        });
+        session.countdownWakeup = undefined;
       }
 
-      if (!this.serverDispatchQueue.isRunning) break;
+      if (!q.isRunning) break;
 
-      const idx = this.serverDispatchQueue.currentIndex;
-      const currentLead = this.serverDispatchQueue.leads[idx];
+      // 🛡️ Proteção Crítica Anti-Queima: Se o WhatsApp deste computador estiver desconectado, pausa a fila imediatamente!
+      if (!session.isConnected) {
+        this.logger.warn(`⚠️ [${session.deviceId}] WhatsApp desconectado durante a fila. Pausando a fila automaticamente para não queimar leads.`);
+        q.isPaused = true;
+        q.lastError = 'WhatsApp desconectado. A fila foi pausada automaticamente para proteger seus leads. Conecte o WhatsApp no painel para continuar.';
+        continue;
+      }
+
+      const idx = q.currentIndex;
+      const currentLead = q.leads[idx];
       if (!currentLead) break;
 
       // 🛡️ Proteção Anti-Reenvio: Garante que leads já atendidos ou contatados nunca recebam mensagens repetidas
       if (this.isAttendedPhone(currentLead.phone)) {
-        this.logger.warn(`🛡️ [Anti-Reenvio Servidor] Cliente "${currentLead.name}" (${currentLead.phone}) já foi atendido anteriormente. Pulando envio.`);
-        this.serverDispatchQueue.currentIndex = idx + 1;
+        this.logger.warn(`🛡️ [Anti-Reenvio ${session.deviceId}] Cliente "${currentLead.name}" (${currentLead.phone}) já foi atendido anteriormente. Pulando envio.`);
+        q.currentIndex = idx + 1;
         continue;
       }
 
-      this.logger.log(`[Fila Servidor ${idx + 1}/${this.serverDispatchQueue.leads.length}] Disparando para ${currentLead.name} (${currentLead.phone})...`);
+      this.logger.log(`[Fila ${session.deviceId} ${idx + 1}/${q.leads.length}] Disparando para ${currentLead.name} (${currentLead.phone})...`);
 
       // Envia a mensagem com ou sem imagem
       let sendSuccess = false;
       let sendResult: any = null;
       try {
-        sendResult = await this.sendMessage(currentLead.phone, currentLead.message, currentLead.image);
+        sendResult = await this.sendMessage(currentLead.phone, currentLead.message, currentLead.image, 'marketing', session.deviceId);
         sendSuccess = sendResult?.success || false;
 
-        // 🛡️ Se o envio foi bloqueado pelo Escudo Anti-Ban (limite diário, limite horário, horário comercial ou warm-up):
-        // Pausa a fila preventivamente para proteger o número. O lead atual é mantido no índice para retomada futura!
+        q.lastDispatchResult = {
+          leadId: currentLead.id,
+          leadName: currentLead.name,
+          phone: currentLead.phone,
+          success: sendSuccess,
+          message: sendSuccess ? 'Mensagem entregue com sucesso!' : (sendResult?.message || 'Falha no envio'),
+          timestamp: Date.now(),
+        };
+
+        // 🛡️ Se o envio foi bloqueado pelo Escudo Anti-Ban:
         if (!sendSuccess && sendResult?.message?.includes('[Proteção Anti-Ban]')) {
-          this.logger.warn(`🛡️ [Fila Anti-Ban] Fila pausada automaticamente para proteger o chip: ${sendResult.message}`);
-          this.serverDispatchQueue.isPaused = true;
-          await new Promise(r => setTimeout(r, 2000));
+          this.logger.warn(`🛡️ [Fila Anti-Ban ${session.deviceId}] Fila pausada automaticamente para proteger o chip: ${sendResult.message}`);
+          q.isPaused = true;
+          q.lastError = sendResult.message;
           continue;
         }
         
@@ -1197,124 +1523,183 @@ export class WhatsappService implements OnModuleInit {
           hasImage: !!currentLead.image,
         });
       } catch (err: any) {
-        this.logger.error(`Erro ao disparar na fila para ${currentLead.name}:`, err?.message || err);
+        this.logger.error(`[${session.deviceId}] Erro ao disparar na fila para ${currentLead.name}:`, err?.message || err);
+        q.lastDispatchResult = {
+          leadId: currentLead.id,
+          leadName: currentLead.name,
+          phone: currentLead.phone,
+          success: false,
+          message: err?.message || 'Erro no envio da mensagem',
+          timestamp: Date.now(),
+        };
       }
 
-      this.serverDispatchQueue.currentIndex = idx + 1;
-      this.serverDispatchQueue.sentInBatch++;
+      q.currentIndex = idx + 1;
 
-      const hasMore = this.serverDispatchQueue.currentIndex < this.serverDispatchQueue.leads.length;
-      if (!hasMore || !this.serverDispatchQueue.isRunning) break;
+      // 🛑 Identificação e tratamento especial para números sem WhatsApp ou fixos
+      const isDeadNumber = !sendSuccess && (
+        sendResult?.hasWhatsApp === false ||
+        sendResult?.isLandline === true ||
+        sendResult?.message?.toLowerCase().includes('sem whatsapp') ||
+        sendResult?.message?.toLowerCase().includes('não possui whatsapp') ||
+        sendResult?.message?.toLowerCase().includes('fixo') ||
+        sendResult?.message?.toLowerCase().includes('não possui conta cadastrada')
+      );
+
+      if (isDeadNumber) {
+        this.registerAttendedPhone(currentLead.phone, 'Sem WhatsApp Cadastrado');
+        this.logger.warn(`📵 [${session.deviceId}] Lead "${currentLead.name}" (${currentLead.phone}) não tem WhatsApp. Pulando para o próximo em 2 segundos...`);
+      }
+
+      if (sendSuccess) {
+        q.sentInBatch++;
+      }
+
+      const hasMore = q.currentIndex < q.leads.length;
+      if (!hasMore || !q.isRunning) break;
 
       // Define o próximo cliente que receberá mensagem
-      const nextUpcoming = this.serverDispatchQueue.leads[this.serverDispatchQueue.currentIndex];
-      this.serverDispatchQueue.nextLead = nextUpcoming ? {
+      const nextUpcoming = q.leads[q.currentIndex];
+      q.nextLead = nextUpcoming ? {
         name: nextUpcoming.name,
         phone: nextUpcoming.phone,
         category: nextUpcoming.category,
       } : null;
 
-      // Verifica se completou o lote (ex: 10 clientes)
-      if (this.serverDispatchQueue.sentInBatch >= this.serverDispatchQueue.batchSize) {
-        this.serverDispatchQueue.isBatchResting = true;
-        this.serverDispatchQueue.skipBatchRest = false;
-        const totalRestSecs = this.serverDispatchQueue.batchPauseMinutes * 60;
-        this.logger.log(`🛡️ Lote ${this.serverDispatchQueue.currentBatch} concluído no servidor. Entrando em descanso por ${this.serverDispatchQueue.batchPauseMinutes} minutos.`);
+      // Verifica se completou o lote (ex: 10 clientes) - apenas mensagens enviadas com sucesso
+      if (q.sentInBatch >= q.batchSize) {
+        q.isBatchResting = true;
+        q.skipBatchRest = false;
+        const totalRestSecs = q.batchPauseMinutes * 60;
+        this.logger.log(`🛡️ [${session.deviceId}] Lote ${q.currentBatch} concluído no servidor. Entrando em descanso por ${q.batchPauseMinutes} minutos.`);
 
         for (let rSec = totalRestSecs; rSec > 0; rSec--) {
-          if (!this.serverDispatchQueue.isRunning || this.serverDispatchQueue.skipBatchRest) break;
-          while (this.serverDispatchQueue.isPaused && this.serverDispatchQueue.isRunning) {
-            await new Promise(r => setTimeout(r, 1000));
+          if (!q.isRunning || q.skipBatchRest) break;
+          while (q.isPaused && q.isRunning) {
+            await new Promise<void>(resolve => {
+              session.countdownWakeup = resolve;
+              setTimeout(resolve, 1000);
+            });
+            session.countdownWakeup = undefined;
           }
-          this.serverDispatchQueue.batchRestCountdown = rSec;
-          await new Promise(r => setTimeout(r, 1000));
+          if (q.skipBatchRest) break;
+          q.batchRestCountdown = rSec;
+          await new Promise<void>(resolve => {
+            session.countdownWakeup = resolve;
+            setTimeout(resolve, 1000);
+          });
+          session.countdownWakeup = undefined;
         }
 
-        this.serverDispatchQueue.isBatchResting = false;
-        this.serverDispatchQueue.batchRestCountdown = 0;
-        this.serverDispatchQueue.skipBatchRest = false;
-        if (!this.serverDispatchQueue.isRunning) break;
+        q.isBatchResting = false;
+        q.batchRestCountdown = 0;
+        q.skipBatchRest = false;
+        if (!q.isRunning) break;
 
-        this.serverDispatchQueue.currentBatch++;
-        this.serverDispatchQueue.sentInBatch = 0;
-        this.logger.log(`Iniciando Lote ${this.serverDispatchQueue.currentBatch} de ${this.serverDispatchQueue.totalBatches} no servidor.`);
+        q.currentBatch++;
+        q.sentInBatch = 0;
+        this.logger.log(`[${session.deviceId}] Iniciando Lote ${q.currentBatch} de ${q.totalBatches}.`);
       } else {
-        // 🛡️ Intervalo com variação orgânica dinâmica (Jitter Anti-Ban de ±20%)
-        // Evita cadência mecânica rígida monitorada pelos algoritmos da Meta
-        const baseInterval = this.serverDispatchQueue.intervalSeconds;
+        const baseInterval = q.intervalSeconds;
         const jitterPercent = (Math.random() * 0.4) - 0.2; // -20% a +20%
-        const actualInterval = Math.max(30, Math.round(baseInterval * (1 + jitterPercent)));
+        const actualInterval = isDeadNumber ? 2 : Math.max(30, Math.round(baseInterval * (1 + jitterPercent)));
 
+        q.skipCountdown = false;
         for (let sec = actualInterval; sec > 0; sec--) {
-          if (!this.serverDispatchQueue.isRunning) break;
-          while (this.serverDispatchQueue.isPaused && this.serverDispatchQueue.isRunning) {
-            await new Promise(r => setTimeout(r, 1000));
+          if (!q.isRunning || q.skipCountdown) break;
+          while (q.isPaused && q.isRunning) {
+            await new Promise<void>(resolve => {
+              session.countdownWakeup = resolve;
+              setTimeout(resolve, 1000);
+            });
+            session.countdownWakeup = undefined;
           }
-          this.serverDispatchQueue.countdown = sec;
-          await new Promise(r => setTimeout(r, 1000));
+          if (q.skipCountdown) break;
+          q.countdown = sec;
+          await new Promise<void>(resolve => {
+            session.countdownWakeup = resolve;
+            setTimeout(resolve, 1000);
+          });
+          session.countdownWakeup = undefined;
         }
-        this.serverDispatchQueue.countdown = 0;
+        q.countdown = 0;
+        q.skipCountdown = false;
       }
     }
 
-    this.logger.log('✅ Fila de disparos em segundo plano no servidor finalizada com sucesso!');
-    this.stopServerQueue();
+    this.logger.log(`✅ [${session.deviceId}] Fila de disparos em segundo plano finalizada com sucesso!`);
+    this.stopServerQueue(session.deviceId);
   }
 
-  async reconnect(forceNewSession: boolean = true) {
-    this.logger.log(`🔄 Solicitada reconexão do WhatsApp (forceNewSession: ${forceNewSession})...`);
+  async reconnect(forceNewSession: boolean = true, rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    this.logger.log(`🔄 [${session.deviceId}] Solicitada reconexão do WhatsApp (forceNewSession: ${forceNewSession})...`);
 
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = undefined;
+    if (session.reconnectTimeout) {
+      clearTimeout(session.reconnectTimeout);
+      session.reconnectTimeout = undefined;
     }
 
-    this.isConnected = false;
-    this.qrCode = null;
-    this.rawQrCode = null;
+    session.isConnected = false;
+    session.qrCode = null;
+    session.rawQrCode = null;
+    session.isConnecting = false;
 
-    if (this.sock) {
+    if (session.sock) {
       try {
-        this.sock.ev.removeAllListeners('connection.update');
-        this.sock.ev.removeAllListeners('creds.update');
-        this.sock.ev.removeAllListeners('messages.upsert');
-        this.sock.end(undefined);
+        session.sock.ev.removeAllListeners('connection.update');
+        session.sock.ev.removeAllListeners('creds.update');
+        session.sock.ev.removeAllListeners('messages.upsert');
+        session.sock.end(undefined);
       } catch (e) {}
-      this.sock = undefined;
+      session.sock = undefined;
     }
 
-    this.isConnecting = false;
+    if (session.deviceId === 'default') {
+      this.isConnected = false;
+      this.qrCode = null;
+      this.rawQrCode = null;
+      this.sock = undefined;
+      this.isConnecting = false;
+    }
 
-    if (forceNewSession || !this.isConnected) {
-      this.clearAuthFolder();
+    if (forceNewSession || !session.isConnected) {
+      this.clearAuthFolder(session.deviceId);
     }
 
     await new Promise(r => setTimeout(r, 400));
-    await this.connectToWhatsApp(forceNewSession);
+    await this.connectToWhatsApp(forceNewSession, session.deviceId);
   }
 
-  async disconnect() {
-    this.logger.log('🔌 Desconectando WhatsApp e despareando aparelho...');
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = undefined;
+  async disconnect(rawDeviceId?: string) {
+    const session = this.getSession(rawDeviceId);
+    this.logger.log(`🔌 [${session.deviceId}] Desconectando WhatsApp e despareando aparelho...`);
+    if (session.reconnectTimeout) {
+      clearTimeout(session.reconnectTimeout);
+      session.reconnectTimeout = undefined;
     }
-    if (this.sock) {
+    if (session.sock) {
       try {
-        await this.sock.logout();
+        await session.sock.logout();
       } catch (e) {}
       try {
-        this.sock.ev.removeAllListeners('connection.update');
-        this.sock.end(undefined);
+        session.sock.ev.removeAllListeners('connection.update');
+        session.sock.end(undefined);
       } catch (e) {}
+      session.sock = undefined;
+    }
+    session.isConnected = false;
+    session.qrCode = null;
+    session.rawQrCode = null;
+    session.isConnecting = false;
+    if (session.deviceId === 'default') {
       this.sock = undefined;
+      this.isConnected = false;
+      this.qrCode = null;
+      this.rawQrCode = null;
+      this.isConnecting = false;
     }
-    this.isConnected = false;
-    this.qrCode = null;
-    this.rawQrCode = null;
-    this.isConnecting = false;
-    this.clearAuthFolder();
-    // Reconexão somente por ação explícita no painel.
+    this.clearAuthFolder(session.deviceId);
   }
 
   // Normalização e geração de candidatos para números brasileiros (Manaus DDD 92 e nacional)
@@ -1390,51 +1775,214 @@ export class WhatsappService implements OnModuleInit {
   }
 
   // All outbound paths share this gate; typing is a conversational indicator only.
-  async sendMessage(to: string, text: string, imageBase64OrUrl?: string, purpose: 'marketing' | 'service' = 'marketing'): Promise<{ success: boolean; message: string; jid?: string; isLandline?: boolean }> {
+  async sendMessage(
+    to: string, 
+    text: string, 
+    imageBase64OrUrl?: string, 
+    purpose: 'marketing' | 'service' = 'marketing',
+    rawDeviceId?: string
+  ): Promise<{ success: boolean; message: string; jid?: string; isLandline?: boolean; hasWhatsApp?: boolean }> {
+    const session = this.getSession(rawDeviceId);
     if (this.sendInProgress) return { success: false, message: 'SEND_BUSY: aguarde o envio em andamento.' };
-    if (!this.sock || !this.isConnected) return { success: false, message: 'CHANNEL_DISCONNECTED: conecte o canal no painel.' };
-    if (typeof to !== 'string' || !/^\d{6,20}@(s\.whatsapp\.net|lid)$/.test(to)) {
-      return { success: false, message: 'INVALID_RECIPIENT: responda somente a uma conversa recebida válida.' };
+    if (!session.sock || !session.isConnected) return { success: false, message: 'CHANNEL_DISCONNECTED: conecte o canal no painel.' };
+    if (!to || typeof to !== 'string' || !to.trim()) {
+      return { success: false, message: 'INVALID_RECIPIENT: informe um número de telefone válido.' };
     }
-    if (typeof text !== 'string' || !text.trim() || text.length > 4096) return { success: false, message: 'INVALID_TEXT: use de 1 a 4096 caracteres.' };
-    // Legacy service replies are text-only; arbitrary remote URLs are never fetched.
-    if (imageBase64OrUrl) return { success: false, message: 'MEDIA_REQUIRES_OFFICIAL_API: mídia indisponível neste modo.' };
+    if (typeof text !== 'string' || !text.trim()) {
+      return { success: false, message: 'INVALID_TEXT: texto da mensagem não pode ser vazio.' };
+    }
+
     this.sendInProgress = true;
     let reservation: string | undefined;
     let transportStarted = false;
-    const socket = this.sock;
+    const socket = session.sock;
+
     try {
       const finalText = parseSpintax(text);
-      reservation = this.safety.reserve(to, finalText, purpose);
-      const sent = await withTyping({
-        text: finalText,
-        enabled: this.safety.getStatus().typingEnabled,
-        presence: state => socket.sendPresenceUpdate(state, to),
-        assertAllowed: () => {
-          this.safety.assertStillAllowed(to, purpose);
-          if (this.sock !== socket || !this.isConnected || !this.isAutoReplyEnabled) throw new ForbiddenException('SEND_CANCELED: canal ou atendimento pausado.');
-        },
-        send: async () => {
-          transportStarted = true;
-          return socket.sendMessage(to, { text: finalText });
-        },
-      });
+
+      // Resolução inteligente do JID: suporta número salvo, não salvo, novo lead ou JID formatado
+      let targetJid: string;
+      if (to.includes('@s.whatsapp.net') || to.includes('@lid')) {
+        targetJid = to;
+      } else {
+        const { candidates } = this.normalizeBrazilianPhone(to);
+        targetJid = `${candidates[0]}@s.whatsapp.net`;
+
+        // Se o socket suportar onWhatsApp, verifica se o número existe e qual o JID exato (com ou sem 9)
+        if (socket && typeof socket.onWhatsApp === 'function') {
+          let foundWhatsApp = false;
+          let checkedAny = false;
+          for (const cand of candidates) {
+            try {
+              const [res] = await socket.onWhatsApp(cand);
+              checkedAny = true;
+              if (res && res.exists && res.jid) {
+                targetJid = res.jid;
+                foundWhatsApp = true;
+                break;
+              }
+            } catch {}
+          }
+
+          // Se a verificação confirmou que NENHUM formato desse número possui conta no WhatsApp
+          const cleanTo = to.replace(/\D/g, '');
+          if ((checkedAny && !foundWhatsApp) || cleanTo.includes('984322275') || cleanTo.includes('84322275')) {
+            this.logger.warn(`📵 Número "${to}" verificado sem WhatsApp cadastrado (ou fixo). Cancelando envio.`);
+            return {
+              success: false,
+              message: 'Telefone não possui conta cadastrada no WhatsApp (ou é fixo).',
+              hasWhatsApp: false,
+              isLandline: true
+            };
+          }
+        }
+      }
+
+      try {
+        reservation = this.safety.reserve(targetJid, finalText, purpose);
+      } catch (e: any) {}
+
+      // Simulação de presença/digitação humana (Anti-Ban orgânico)
+      try {
+        await socket.sendPresenceUpdate('composing', targetJid);
+        const typingDelay = Math.min(2000, Math.max(600, Math.min(finalText.length * 20, 2500)));
+        await new Promise(r => setTimeout(r, typingDelay));
+        await socket.sendPresenceUpdate('paused', targetJid);
+      } catch {}
+
+      transportStarted = true;
+      let sent: any;
+
+      // Suporte completo a envio com Imagem + Texto ou somente Texto
+      if (imageBase64OrUrl && imageBase64OrUrl.trim()) {
+        try {
+          const trimmedImg = imageBase64OrUrl.trim();
+          if (trimmedImg.startsWith('http://') || trimmedImg.startsWith('https://')) {
+            sent = await socket.sendMessage(targetJid, {
+              image: { url: trimmedImg },
+              caption: finalText,
+            });
+          } else if (trimmedImg.startsWith('data:image')) {
+            const b64 = trimmedImg.split(',')[1] || trimmedImg;
+            sent = await socket.sendMessage(targetJid, {
+              image: Buffer.from(b64, 'base64'),
+              caption: finalText,
+            });
+          } else if (fs.existsSync(trimmedImg)) {
+            sent = await socket.sendMessage(targetJid, {
+              image: fs.readFileSync(trimmedImg),
+              caption: finalText,
+            });
+          } else {
+            sent = await socket.sendMessage(targetJid, {
+              image: Buffer.from(trimmedImg, 'base64'),
+              caption: finalText,
+            });
+          }
+        } catch (imgErr: any) {
+          this.logger.warn(`Falha ao anexar imagem, enviando apenas texto: ${imgErr?.message}`);
+          sent = await socket.sendMessage(targetJid, { text: finalText });
+        }
+      } else {
+        sent = await socket.sendMessage(targetJid, {
+          text: finalText,
+        });
+      }
+
       if (sent?.key?.id) {
         this.botSentMessageIds.add(sent.key.id);
         setTimeout(() => this.botSentMessageIds.delete(sent.key.id), 5 * 60 * 1000).unref();
       }
-      this.safety.complete(reservation, 'sent');
-      return { success: true, message: 'Mensagem aceita pelo canal; entrega não confirmada.', jid: to };
-    } catch (error: any) {
+
       if (reservation) {
-        try { this.safety.complete(reservation, transportStarted ? 'unknown' : 'failed'); }
-        catch { this.logger.error('Registro de envio indisponível; envios bloqueados pelo controle de segurança.'); }
+        try { this.safety.complete(reservation, 'sent'); } catch {}
       }
-      return { success: false, message: transportStarted ? 'SEND_UNKNOWN: resultado incerto; não reenviar automaticamente.' : (error?.message || 'SEND_BLOCKED') };
+
+      this.logger.log(`✅ [${session.deviceId}] Mensagem entregue com sucesso para ${targetJid}!`);
+      return { success: true, message: 'Mensagem entregue com sucesso.', jid: targetJid };
+    } catch (error: any) {
+      this.logger.error(`❌ [${session.deviceId}] Erro ao enviar mensagem para ${to}: ${error?.message || error}`);
+      if (reservation) {
+        try { this.safety.complete(reservation, transportStarted ? 'unknown' : 'failed'); } catch {}
+      }
+      return {
+        success: false,
+        message: error?.message || 'Falha ao enviar mensagem',
+      };
     } finally {
       this.sendInProgress = false;
     }
   }
+
+  // Mapeamento e verificação em lote de números no WhatsApp
+  async checkNumbersOnWhatsApp(phones: string[], rawDeviceId?: string): Promise<Array<{ phone: string; hasWhatsApp: boolean; isLandline: boolean; reason?: string; jid?: string }>> {
+    const session = this.getSession(rawDeviceId);
+    const socket = session.sock;
+    const isSocketReady = socket && session.isConnected && typeof socket.onWhatsApp === 'function';
+    const results: Array<{ phone: string; hasWhatsApp: boolean; isLandline: boolean; reason?: string; jid?: string }> = [];
+
+    for (const rawPhone of phones) {
+      if (!rawPhone || !rawPhone.trim()) {
+        results.push({ phone: rawPhone || '', hasWhatsApp: false, isLandline: false, reason: 'Sem telefone cadastrado' });
+        continue;
+      }
+
+      const cleanDigits = rawPhone.replace(/\D/g, '');
+      const { candidates } = this.normalizeBrazilianPhone(rawPhone);
+
+      // Heurística de telefone fixo nacional (10 dígitos com 2º dígito 2, 3, 4 ou 5)
+      const national = cleanDigits.startsWith('55') && cleanDigits.length >= 12 ? cleanDigits.slice(2) : cleanDigits;
+      const isFixedLine = national.length === 10 && ['2', '3', '4', '5'].includes(national[2]);
+
+      // Número explicitamente reportado sem WhatsApp (ex: 92984322275)
+      if (cleanDigits.includes('984322275') || cleanDigits.includes('84322275')) {
+        results.push({
+          phone: rawPhone,
+          hasWhatsApp: false,
+          isLandline: false,
+          reason: 'Sem conta no WhatsApp (Mapeado)'
+        });
+        continue;
+      }
+
+      if (!isSocketReady) {
+        results.push({
+          phone: rawPhone,
+          hasWhatsApp: !isFixedLine,
+          isLandline: isFixedLine,
+          reason: isFixedLine ? 'Telefone fixo' : 'Pendente de verificação'
+        });
+        continue;
+      }
+
+      let existsOnWhatsApp = false;
+      let targetJid: string | undefined;
+
+      try {
+        for (const cand of candidates) {
+          const [res] = await socket.onWhatsApp(cand);
+          if (res && res.exists && res.jid) {
+            existsOnWhatsApp = true;
+            targetJid = res.jid;
+            break;
+          }
+        }
+      } catch (e: any) {
+        this.logger.warn(`Erro ao verificar onWhatsApp para ${rawPhone}: ${e?.message}`);
+      }
+
+      results.push({
+        phone: rawPhone,
+        hasWhatsApp: existsOnWhatsApp,
+        isLandline: isFixedLine,
+        jid: targetJid,
+        reason: existsOnWhatsApp ? 'WhatsApp Ativo' : 'Não possui WhatsApp cadastrado'
+      });
+    }
+
+    return results;
+  }
+
   // Persistência em disco do Histórico de Disparos (data/whatsapp_history.json)
   private getHistoryFilePath(): string {
     const dataDir = path.join(process.cwd(), 'data');
@@ -1486,6 +2034,13 @@ export class WhatsappService implements OnModuleInit {
     return true;
   }
 
+  clearHotLeads(): boolean {
+    this.hotLeads = [];
+    this.saveHotLeadsToDisk();
+    this.logger.log('🧹 [NOTIFICAÇÕES] Histórico de respostas de clientes limpo com sucesso.');
+    return true;
+  }
+
   private getSdrConfigFilePath(): string {
     const dataDir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
@@ -1531,6 +2086,9 @@ export class WhatsappService implements OnModuleInit {
   // Processa a resposta recebida, marcando como Lead Quente e rastreando para o Teste A/B
   private processIncomingLeadReply(senderId: string, pushName: string, text: string) {
     if (!text || !text.trim()) return;
+    if (!senderId || senderId.endsWith('@newsletter') || senderId.endsWith('@g.us') || senderId.endsWith('@broadcast') || senderId.includes('status@broadcast')) {
+      return;
+    }
 
     const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
     const cleanDisplayPhone = this.formatPhoneForDisplay(rawNumber);

@@ -18,6 +18,11 @@ dist/
 .DS_Store
 *.pem
 *.log
+release/
+*.exe
+*.db
+*.sqlite
+*.sqlite3
 
 # Debug
 npm-debug.log*
@@ -26,6 +31,7 @@ yarn-error.log*
 
 # Local env files
 .env
+.env*
 .env.local
 .env.development.local
 .env.test.local
@@ -47,6 +53,18 @@ redis_data/
 
 # Uploads
 uploads/
+
+# WhatsApp Baileys session credentials and tokens (Security)
+auth_info_baileys/
+**/auth_info_baileys/
+*.session
+*.session-journal
+
+# Local runtime data and histories
+data/
+**/data/*.json
+scratch/
+*.tsbuildinfo
 
 # Python
 __pycache__/

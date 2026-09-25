@@ -38,10 +38,11 @@ if not exist "%~dp0apps\web\.env.local" (
 )
 
 :: ============================================================
-:: 3. LIMPEZA DE PORTAS (EVITA ERRO DE PORTA JA EM USO)
+:: 3. LIMPEZA DE PORTAS (3000 E 3001)
 :: ============================================================
-REM Processos existentes devem ser encerrados pelo operador antes de reiniciar.
-REM Processos existentes devem ser encerrados pelo operador antes de reiniciar.
+echo Liberando portas 3000 e 3001...
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 3000, 3001 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>&1
+echo Banco de dados local SQLite ativo (zero configuracao, sem Docker).
 
 :: ============================================================
 :: 4. INSTALACAO AUTOMATICA DE DEPENDENCIAS
@@ -121,6 +122,17 @@ if not exist "%~dp0apps\web\.next" (
     color 0A
 )
 
+:: Compilacao automatica da API se dist nao existir
+if not exist "%~dp0apps\api\dist" (
+    color 0E
+    echo.
+    echo Compilando Servidor API inicial...
+    cd /d "%~dp0apps\api"
+    call npm run build
+    cd /d "%~dp0"
+    color 0A
+)
+
 :: ============================================================
 :: 6. INICIALIZACAO DOS SERVICOS
 :: ============================================================
@@ -133,19 +145,23 @@ echo ===================================================================
 echo.
 
 echo [1/2] Iniciando Servidor API e Robô WhatsApp (Porta 3001)...
-start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor API... && npm run start:dev"
+if "%opcao%"=="3" (
+    start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor API (DEV)... && npm run start:dev"
+) else (
+    start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor API (TURBO)... && node dist/main.js"
+)
 
 if "%opcao%"=="3" (
-    echo [2/2] Iniciando Painel Web em Modo DEV (Live Reload)...
+    echo [2/2] Iniciando Painel Web em Modo DEV [Live Reload]...
     start "Radar - Painel Web" cmd /k "cd /d ""%~dp0apps\web"" && title Radar - Painel Web [DEV] && echo Iniciando Painel Web Modo Dev... && npm run dev"
 ) else (
-    echo [2/2] Iniciando Painel Web em Alta Velocidade Turbo (Porta 3000)...
+    echo [2/2] Iniciando Painel Web em Alta Velocidade Turbo - Porta 3000...
     start "Radar - Painel Web" cmd /k "cd /d ""%~dp0apps\web"" && title Radar - Painel Web [TURBO] && echo Iniciando Painel Web Turbo... && npm run start"
 )
 
 echo.
-echo Aguardando inicializacao dos servidores...
-ping 127.0.0.1 -n 6 >nul
+echo Aguardando inicializacao completa dos servidores (API e Painel Web)...
+powershell -NoProfile -Command "$ready = $false; for ($i = 0; $i -lt 40; $i++) { try { $r1 = (Invoke-WebRequest -Uri 'http://localhost:3000/login' -UseBasicParsing -TimeoutSec 1).StatusCode; $r2 = (Invoke-WebRequest -Uri 'http://localhost:3001/api/health' -UseBasicParsing -TimeoutSec 1).StatusCode; if ($r1 -eq 200 -and $r2 -eq 200) { $ready = $true; break } } catch {}; Start-Sleep -Milliseconds 700 }; if ($ready) { Write-Host '  [OK] Servidores 100% prontos e conectados!' -ForegroundColor Green } else { Write-Host '  [!] Abrindo navegador...' -ForegroundColor Yellow }"
 
 echo Abrindo o navegador no Radar de Oportunidades...
 start http://localhost:3000/login

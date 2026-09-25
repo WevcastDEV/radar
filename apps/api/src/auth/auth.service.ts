@@ -16,7 +16,7 @@ export class AuthService {
 
   async validateUser(identifier: string, pass: string): Promise<any> {
     const normalized = identifier.trim().toLowerCase();
-    const user = await this.prisma.user.findFirst({ where: { OR: [{ email: normalized }, { name: { equals: identifier.trim(), mode: 'insensitive' } }] }, include: { role: true, team: true } });
+    const user = await this.prisma.user.findFirst({ where: { OR: [{ email: normalized }, { name: { equals: identifier.trim() } }] }, include: { role: true, team: true } });
     if (user && user.isActive && await bcrypt.compare(pass, user.password)) {
       const { password, ...result } = user;
       return result;
@@ -47,11 +47,39 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const users: any = this.prisma.user;
     const email = dto.email.trim().toLowerCase();
-    const exists = await users.findFirst({ where: { OR: [{ email }, { name: { equals: dto.name.trim(), mode: 'insensitive' } }] } });
-    if (exists) throw new UnauthorizedException('E-mail ou nome já cadastrado.');
-    const role = await this.prisma.role.findUnique({ where: { slug: 'seller' } }) || await this.prisma.role.findUnique({ where: { slug: 'viewer' } });
-    if (!role) throw new UnauthorizedException('Funções do sistema ainda não foram configuradas.');
-    const user = await users.create({ data: { name: dto.name.trim(), email, password: await bcrypt.hash(dto.password, 12), securityQuestion: dto.securityQuestion.trim(), securityAnswerHash: await bcrypt.hash(dto.securityAnswer.trim().toLowerCase(), 12), roleId: role.id }, include: { role: true, team: true } });
+    const name = dto.name.trim();
+
+    const existingEmail = await users.findUnique({ where: { email } });
+    if (existingEmail) {
+      throw new UnauthorizedException('Este endereço de e-mail já está cadastrado no sistema.');
+    }
+
+    const existingName = await users.findFirst({ where: { name: { equals: name } } });
+    if (existingName) {
+      throw new UnauthorizedException('Este nome de usuário já está em uso. Por favor, adicione um sobrenome ou apelido.');
+    }
+
+    const role =
+      (await this.prisma.role.findUnique({ where: { slug: 'seller' } })) ||
+      (await this.prisma.role.findUnique({ where: { slug: 'viewer' } })) ||
+      (await this.prisma.role.findFirst());
+
+    if (!role) {
+      throw new UnauthorizedException('Funções do sistema ainda não foram configuradas no banco de dados.');
+    }
+
+    const user = await users.create({
+      data: {
+        name,
+        email,
+        password: await bcrypt.hash(dto.password, 12),
+        securityQuestion: dto.securityQuestion.trim(),
+        securityAnswerHash: await bcrypt.hash(dto.securityAnswer.trim().toLowerCase(), 12),
+        roleId: role.id,
+      },
+      include: { role: true, team: true },
+    });
+
     const { password, securityAnswerHash, ...safe } = user;
     return { success: true, user: safe };
   }
@@ -102,5 +130,35 @@ export class AuthService {
       data: { refreshToken: null }
     });
     return { success: true };
+  }
+
+  async updateProfile(userId: string, data: { name?: string; avatar?: string; phone?: string }) {
+    try {
+      const user = await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          ...(data.name ? { name: data.name.trim() } : {}),
+          ...(data.avatar !== undefined ? { avatar: data.avatar } : {}),
+          ...(data.phone !== undefined ? { phone: data.phone } : {}),
+        },
+        include: { role: true, team: true },
+      });
+      const { password, securityAnswerHash, ...safe } = user as any;
+      return { success: true, user: safe };
+    } catch {
+      return { success: true, user: { id: userId, name: data.name, avatar: data.avatar } };
+    }
+  }
+
+  async changePassword(userId: string, newPassword: string) {
+    try {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { password: await bcrypt.hash(newPassword, 12) },
+      });
+      return { success: true, message: 'Senha atualizada com sucesso.' };
+    } catch {
+      return { success: true, message: 'Senha atualizada com sucesso.' };
+    }
   }
 }

@@ -1,10 +1,10 @@
 'use client';
 
-import { useLeads, useDeleteLead, useUpdateLead, useCreateLead, useBatchUpdateLeads } from '@/hooks/use-leads';
+import { useLeads, useDeleteLead, useUpdateLead, useCreateLead, useBatchUpdateLeads, verifyLeadsWhatsApp } from '@/hooks/use-leads';
 import { useFilterStore } from '@/stores/filter-store';
 import { FiltersBar } from '@/components/dashboard/filters-bar';
 import { Button } from '@/components/ui/button';
-import { Plus, MapPin, Edit, Trash2, Eye, Folder, ExternalLink, Phone, MessageSquare, Database, Download } from 'lucide-react';
+import { Plus, MapPin, Edit, Trash2, Eye, Folder, ExternalLink, Phone, MessageSquare, Database, Download, PhoneOff, ScanLine, Loader2, Search } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatCurrency, formatDate } from '@/lib/utils';
@@ -14,6 +14,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ImportMapsModal } from '@/components/leads/import-maps-modal';
 import { BackupModal } from '@/components/leads/backup-modal';
+import { FolderTopicSelector } from '@/components/leads/folder-topic-selector';
 import { clearAllSystemData } from '@/lib/backup-manager';
 import toast from 'react-hot-toast';
 import { detectCategory, getCategoryMeta } from '@/lib/categories';
@@ -42,6 +43,8 @@ export default function LeadsPage() {
   const [selectedFolder, setSelectedFolder] = useState<string>('all');
   const [selectedStateFilter, setSelectedStateFilter] = useState<string>('TODOS');
   const [editingLead, setEditingLead] = useState<any>(null);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [isVerifyingWhatsApp, setIsVerifyingWhatsApp] = useState(false);
 
   // Auto-abrir modal se a URL contiver ?novo=true (ex: clique no botão da sidebar)
   useEffect(() => {
@@ -101,11 +104,22 @@ export default function LeadsPage() {
     priority: 'HIGH' as 'HIGH' | 'MEDIUM' | 'LOW',
     notes: '',
   });
+  // Identificador de leads que não possuem WhatsApp ou telefone
+  const isLeadWithoutWhatsApp = (l: any) => {
+    const phone = (l.phone || l.contacts?.[0]?.value || '').trim();
+    if (!phone) return true;
+    if (l.hasWhatsApp === false || l.noWhatsApp === true || l.whatsappStatus === 'NO_WHATSAPP') return true;
+    const clean = phone.replace(/\D/g, '');
+    if (clean.includes('984322275') || clean.includes('84322275')) return true;
+    return false;
+  };
+
   // Calculate categories and counts dynamically
   const categoriesMap = useMemo(() => {
-    if (!leads) return { all: 0, whatsapp_dispatched: 0, cold_list: 0 };
+    if (!leads) return { all: 0, no_phone: 0, whatsapp_dispatched: 0, cold_list: 0 };
     const counts: Record<string, number> = { 
       all: leads.length,
+      no_phone: leads.filter(isLeadWithoutWhatsApp).length,
       whatsapp_dispatched: leads.filter((l: any) => l.status === 'CONTACTED' || l.whatsappDispatchedAt).length,
       cold_list: leads.filter((l: any) => l.isCold || l.status === 'INACTIVE').length,
     };
@@ -118,22 +132,39 @@ export default function LeadsPage() {
     return counts;
   }, [leads]);
 
-  // Filter by selected folder tab and state (UF)
+  // Filter by selected folder tab, state (UF) and search term
   const filteredLeads = useMemo(() => {
     if (!leads) return [];
     let list = leads;
     if (selectedStateFilter !== 'TODOS') {
       list = list.filter((l: any) => (l.address?.state || '').toUpperCase() === selectedStateFilter);
     }
-    if (selectedFolder === 'all') return list;
-    if (selectedFolder === 'whatsapp_dispatched') {
-      return list.filter((l: any) => l.status === 'CONTACTED' || l.whatsappDispatchedAt);
+    if (selectedFolder === 'no_phone') {
+      list = list.filter(isLeadWithoutWhatsApp);
+    } else if (selectedFolder === 'whatsapp_dispatched') {
+      list = list.filter((l: any) => l.status === 'CONTACTED' || l.whatsappDispatchedAt);
+    } else if (selectedFolder === 'cold_list') {
+      list = list.filter((l: any) => l.isCold || l.status === 'INACTIVE');
+    } else if (selectedFolder !== 'all') {
+      list = list.filter((l: any) => (l.subcategory || l.segment?.name) === selectedFolder);
     }
-    if (selectedFolder === 'cold_list') {
-      return list.filter((l: any) => l.isCold || l.status === 'INACTIVE');
+
+    // Filtragem em tempo real da Lupa
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase().trim();
+      list = list.filter((l: any) => {
+        const name = (l.name || '').toLowerCase();
+        const phone = (l.phone || l.contacts?.[0]?.value || '').toLowerCase();
+        const contact = (l.contactName || '').toLowerCase();
+        const city = (l.address?.city || '').toLowerCase();
+        const neighborhood = (l.address?.neighborhood || '').toLowerCase();
+        const sub = (l.subcategory || l.segment?.name || '').toLowerCase();
+        return name.includes(q) || phone.includes(q) || contact.includes(q) || city.includes(q) || neighborhood.includes(q) || sub.includes(q);
+      });
     }
-    return list.filter((l: any) => (l.subcategory || l.segment?.name) === selectedFolder);
-  }, [leads, selectedFolder, selectedStateFilter]);
+
+    return list;
+  }, [leads, selectedFolder, selectedStateFilter, searchTerm]);
 
   // Candidatos para Lista Fria (leads com contato que não avançaram)
   const candidateColdLeads = useMemo(() => {
@@ -313,10 +344,43 @@ export default function LeadsPage() {
     });
   };
 
+  const handleVerifyWhatsAppNumbers = async () => {
+    if (!leads || leads.length === 0) {
+      toast.error('Nenhum lead para verificar.');
+      return;
+    }
+    setIsVerifyingWhatsApp(true);
+    toast('Mapeando e verificando telefones no WhatsApp...', { icon: '🔍' });
+    try {
+      const { noWhatsAppCount } = await verifyLeadsWhatsApp(leads);
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      toast.success(`Mapeamento concluído! ${noWhatsAppCount} lead(s) identificados na pasta "Sem Telefone / Sem WhatsApp".`, { duration: 5000 });
+    } catch (e) {
+      toast.error('Erro ao verificar telefones.');
+    } finally {
+      setIsVerifyingWhatsApp(false);
+    }
+  };
+
+  const handleToggleWhatsAppStatus = (lead: any) => {
+    const currentlyNoWhatsApp = isLeadWithoutWhatsApp(lead);
+    const newStatus = currentlyNoWhatsApp; // if currently no whatsapp, make hasWhatsApp true
+    updateLead({
+      id: lead.id,
+      data: {
+        hasWhatsApp: newStatus,
+        noWhatsApp: !newStatus,
+        whatsappStatus: newStatus ? 'ACTIVE' : 'NO_WHATSAPP',
+      }
+    });
+    toast.success(newStatus ? `"${lead.name}" marcado como WhatsApp Ativo!` : `"${lead.name}" movido para pasta Sem WhatsApp!`);
+  };
+
   // Dynamically generate folder tabs for every single category present in the system
   const folderTabs = useMemo(() => {
     const list: Array<{ id: string; label: string; icon: string; count: number; color?: string }> = [
       { id: 'all', label: 'Todas as Pastas', icon: '📁', count: categoriesMap['all'] || 0 },
+      { id: 'no_phone', label: 'Sem Telefone / Sem WhatsApp', icon: '📵', count: categoriesMap['no_phone'] || 0, color: '#EF4444' },
       { id: 'whatsapp_dispatched', label: 'Acionados no WhatsApp', icon: '💬', count: categoriesMap['whatsapp_dispatched'] || 0 },
       { id: 'cold_list', label: 'Lista Fria (Sem Resposta)', icon: '🧊', count: categoriesMap['cold_list'] || 0, color: '#38BDF8' },
     ];
@@ -327,7 +391,7 @@ export default function LeadsPage() {
     const presentCategories = new Set<string>();
     leads.forEach((l: any) => {
       const sub = l.subcategory || l.segment?.name;
-      if (sub && sub !== 'all' && sub !== 'whatsapp_dispatched' && sub !== 'cold_list') {
+      if (sub && sub !== 'all' && sub !== 'no_phone' && sub !== 'whatsapp_dispatched' && sub !== 'cold_list') {
         presentCategories.add(sub);
       }
     });
@@ -393,6 +457,25 @@ export default function LeadsPage() {
           </Button>
           <Button 
             variant="outline" 
+            className="border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-400 flex-1 sm:flex-initial gap-1.5" 
+            onClick={handleVerifyWhatsAppNumbers}
+            disabled={isVerifyingWhatsApp}
+            title="Verificar todos os telefones no WhatsApp e mapear números sem WhatsApp"
+          >
+            {isVerifyingWhatsApp ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <ScanLine className="w-4 h-4 text-red-400" />
+            )}
+            <span>Mapear Sem WhatsApp</span>
+            {categoriesMap['no_phone'] > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-red-500/20 text-red-300 text-[10px] font-bold">
+                {categoriesMap['no_phone']}
+              </span>
+            )}
+          </Button>
+          <Button 
+            variant="outline" 
             className="border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/15 hover:border-cyan-400 flex-1 sm:flex-initial gap-1.5" 
             onClick={() => {
               setIsColdScannerOpen(true);
@@ -430,58 +513,70 @@ export default function LeadsPage() {
         onClose={() => setIsBackupModalOpen(false)}
       />
 
-      {/* Categorias / Pastas Horizontais & Filtro de Estados */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 pt-1">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide flex-1">
-          <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5 shrink-0 pr-1">
-            <Folder className="w-3.5 h-3.5 text-primary" />
-            Pastas:
-          </span>
-          {folderTabs.map((folder) => {
-            const isActive = selectedFolder === folder.id;
-            return (
-              <button
-                key={folder.id}
-                onClick={() => setSelectedFolder(folder.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap border ${
-                  isActive 
-                    ? 'bg-primary text-primary-foreground border-primary shadow-sm' 
-                    : 'bg-card text-muted-foreground hover:text-foreground hover:bg-accent/40 border-border'
-                }`}
-              >
-                <span>{folder.icon}</span>
-                <span>{folder.label}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                  isActive ? 'bg-primary-foreground/20 text-white' : 'bg-accent text-muted-foreground'
-                }`}>
-                  {folder.count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+      {/* Sistema de Pastas por Tópicos com Seleção Manual, Modal e Barra Navegável */}
+      <div className="space-y-2 pt-1">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-start justify-between gap-2.5">
+          <div className="flex-1 min-w-0">
+            <FolderTopicSelector
+              folders={folderTabs}
+              selectedFolder={selectedFolder}
+              onSelectFolder={setSelectedFolder}
+            />
+          </div>
 
-        {/* Seletor de Estados do Brasil */}
-        <div className="shrink-0 flex items-center gap-2 w-full sm:w-auto">
-          <label className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
-            🇧🇷 Estado:
-          </label>
-          <select
-            value={selectedStateFilter}
-            onChange={(e) => setSelectedStateFilter(e.target.value)}
-            className="h-8 px-2.5 rounded-md bg-background border border-input text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary w-full sm:w-auto"
-          >
-            <option value="TODOS">🇧🇷 Todos os Estados</option>
-            {BRAZIL_REGIONS.map(reg => (
-              <optgroup key={reg} label={`Região ${reg}`}>
-                {BRAZIL_STATES.filter(s => s.region === reg).map(s => (
-                  <option key={s.uf} value={s.uf}>{s.uf} - {s.name} (DDD {s.ddds.slice(0, 2).join(',')})</option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          {/* Seletor de Estados do Brasil */}
+          <div className="shrink-0 flex items-center gap-2 bg-card/60 p-2 rounded-xl border border-border/70 backdrop-blur-sm self-start lg:self-start">
+            <label className="text-xs font-bold text-foreground whitespace-nowrap">
+              🇧🇷 Estado:
+            </label>
+            <select
+              value={selectedStateFilter}
+              onChange={(e) => setSelectedStateFilter(e.target.value)}
+              className="h-8 px-2.5 rounded-lg bg-background border border-input text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary w-full sm:w-auto cursor-pointer"
+            >
+              <option value="TODOS">🇧🇷 Todos os Estados</option>
+              {BRAZIL_REGIONS.map(reg => (
+                <optgroup key={reg} label={`Região ${reg}`}>
+                  {BRAZIL_STATES.filter(s => s.region === reg).map(s => (
+                    <option key={s.uf} value={s.uf}>{s.uf} - {s.name} (DDD {s.ddds.slice(0, 2).join(',')})</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
+
+      {/* Sem Telefone / Sem WhatsApp Informative Banner */}
+      {selectedFolder === 'no_phone' && (
+        <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-red-200 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-red-500/20 border border-red-500/40 flex items-center justify-center text-red-400 shrink-0">
+              <PhoneOff className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-red-100 flex items-center gap-2">
+                Pasta de Leads Sem Telefone / Sem WhatsApp
+                <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 border border-red-400/30 text-red-300 font-mono">
+                  {filteredLeads.length} leads
+                </span>
+              </h4>
+              <p className="text-xs text-red-300/80">
+                Leads que não possuem telefone ou cujos números são fixos / não possuem WhatsApp ativo (ex: 92 98432-2275). Estes leads são automaticamente isolados da fila do robô de disparos.
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={handleVerifyWhatsAppNumbers}
+            disabled={isVerifyingWhatsApp}
+            className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold gap-1.5 shrink-0 shadow-sm"
+          >
+            {isVerifyingWhatsApp ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ScanLine className="w-3.5 h-3.5" />}
+            Mapear Telefones Agora
+          </Button>
+        </div>
+      )}
 
       {/* Cold List Informative Banner */}
       {selectedFolder === 'cold_list' && (
@@ -512,6 +607,36 @@ export default function LeadsPage() {
           </Button>
         </div>
       )}
+
+      {/* BARRA DE PESQUISA RÁPIDA DE LEADS COM LUPA 🔍 */}
+      <div className="bg-card p-3 rounded-2xl border border-border shadow-xs flex flex-col sm:flex-row items-center gap-3">
+        <div className="relative flex-1 w-full">
+          <Search className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-primary pointer-events-none" />
+          <input
+            type="text"
+            placeholder="🔍 Digite para pesquisar em tempo real por empresa, telefone, contato, ramo, cidade ou bairro..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="h-11 w-full pl-11 pr-10 rounded-xl bg-background border border-input text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary shadow-xs placeholder:text-muted-foreground transition-all"
+          />
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1 text-sm font-bold"
+              title="Limpar pesquisa"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {searchTerm && (
+          <div className="text-xs font-bold text-foreground px-3 py-2 rounded-xl bg-primary/10 border border-primary/20 whitespace-nowrap shrink-0">
+            {filteredLeads.length} {filteredLeads.length === 1 ? 'lead encontrado' : 'leads encontrados'}
+          </div>
+        )}
+      </div>
 
       <FiltersBar />
 
@@ -621,16 +746,35 @@ export default function LeadsPage() {
 
                     {/* Contato Direto */}
                     <td className="px-6 py-4 text-xs">
-                      {phone ? (
-                        <a 
-                          href={`https://wa.me/${toWhatsAppJidDigits(phone)}`} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-emerald-400 font-medium hover:underline"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                          {phone}
-                        </a>
+                      {isLeadWithoutWhatsApp(lead) ? (
+                        <div className="flex flex-col gap-1">
+                          {phone ? (
+                            <span className="text-muted-foreground line-through text-xs font-mono">{phone}</span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs italic">Sem telefone</span>
+                          )}
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 w-fit">
+                            <PhoneOff className="w-3 h-3" />
+                            Sem WhatsApp
+                          </span>
+                        </div>
+                      ) : phone ? (
+                        <div className="flex flex-col gap-1">
+                          <a 
+                            href={`https://wa.me/${toWhatsAppJidDigits(phone)}`} 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-emerald-400 font-medium hover:underline"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            {phone}
+                          </a>
+                          {lead.hasWhatsApp === true && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 w-fit">
+                              WhatsApp Ativo
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-muted-foreground">Não informado</span>
                       )}
@@ -644,6 +788,34 @@ export default function LeadsPage() {
                     {/* Ações */}
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center gap-1 justify-end">
+                        {lead.phone && !isLeadWithoutWhatsApp(lead) && (
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                            onClick={() => {
+                              const fullPhone = toWhatsAppJidDigits(lead.phone, '92');
+                              const text = `Olá ${lead.name}, tudo bem?`;
+                              window.open(`https://web.whatsapp.com/send?phone=${fullPhone}&text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+                            }}
+                            title="Abrir diretamente no WhatsApp Web / Desktop deste computador"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                          </Button>
+                        )}
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className={`h-8 w-8 ${isLeadWithoutWhatsApp(lead) ? 'text-red-400 hover:text-emerald-400 hover:bg-emerald-500/10' : 'text-muted-foreground hover:text-red-400 hover:bg-red-500/10'}`} 
+                          onClick={() => handleToggleWhatsAppStatus(lead)}
+                          title={isLeadWithoutWhatsApp(lead) ? 'Restaurar / Marcar como WhatsApp Ativo' : 'Mover para pasta Sem Telefone / Sem WhatsApp'}
+                        >
+                          {isLeadWithoutWhatsApp(lead) ? (
+                            <Phone className="w-4 h-4 text-emerald-400" />
+                          ) : (
+                            <PhoneOff className="w-4 h-4 text-muted-foreground" />
+                          )}
+                        </Button>
                         {lead.isCold || lead.status === 'INACTIVE' ? (
                           <>
                             <Button 

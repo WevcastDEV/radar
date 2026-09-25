@@ -3,8 +3,52 @@
 // Dados fictícios para demonstração (região de São Paulo)
 // ============================================
 
-import { PrismaClient, LeadStatus, Priority, ContactType, ScoreLevel, ProposalStatus, VisitStatus, GoalType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+
+enum LeadStatus {
+  NEW = 'NEW',
+  CONTACTED = 'CONTACTED',
+  QUALIFIED = 'QUALIFIED',
+  VISIT_SCHEDULED = 'VISIT_SCHEDULED',
+  PROPOSAL_SENT = 'PROPOSAL_SENT',
+  NEGOTIATION = 'NEGOTIATION',
+  WON = 'WON',
+  LOST = 'LOST',
+  INACTIVE = 'INACTIVE',
+}
+
+enum Priority {
+  LOW = 'LOW',
+  MEDIUM = 'MEDIUM',
+  HIGH = 'HIGH',
+  URGENT = 'URGENT',
+}
+
+enum ContactType {
+  PHONE = 'PHONE',
+  WHATSAPP = 'WHATSAPP',
+  EMAIL = 'EMAIL',
+  WEBSITE = 'WEBSITE',
+  OTHER = 'OTHER',
+}
+
+enum ScoreLevel {
+  LOW = 'LOW',
+  MEDIUM = 'MEDIUM',
+  GOOD = 'GOOD',
+  HIGH = 'HIGH',
+  PRIORITY = 'PRIORITY',
+}
+
+enum GoalType {
+  SALES_COUNT = 'SALES_COUNT',
+  SALES_VALUE = 'SALES_VALUE',
+  VISITS = 'VISITS',
+  CALLS = 'CALLS',
+  PROPOSALS = 'PROPOSALS',
+  CONVERSION = 'CONVERSION',
+}
 
 const prisma = new PrismaClient();
 

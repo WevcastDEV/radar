@@ -5,11 +5,13 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
+import { DEFAULT_JWT_SECRET } from '../env';
+
 @Module({
   imports: [
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'fallback-secret',
+      secret: process.env.JWT_SECRET || DEFAULT_JWT_SECRET,
       signOptions: { expiresIn: '15m' },
     }),
   ],

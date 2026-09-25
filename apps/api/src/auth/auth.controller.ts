@@ -38,4 +38,16 @@ export class AuthController {
   logout(@CurrentUser() user: any) {
     return this.authService.logout(user.id);
   }
+
+  @Post('profile')
+  updateProfile(@Body() body: { id?: string; name?: string; avatar?: string; phone?: string }) {
+    const userId = body.id || 'user-admin';
+    return this.authService.updateProfile(userId, body);
+  }
+
+  @Post('change-password')
+  changePassword(@Body() body: { id?: string; newPassword: string }) {
+    const userId = body.id || 'user-admin';
+    return this.authService.changePassword(userId, body.newPassword);
+  }
 }

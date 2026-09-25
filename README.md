@@ -1,293 +1,196 @@
-# 🎯 Radar de Oportunidades
+# 🎯 Radar de Oportunidades PRO
 
-**Plataforma SaaS de Prospecção Comercial para Segurança Eletrônica**
+> **Plataforma Omnichannel B2B de Prospecção Ativa, CRM Inteligente & Automação de Conversas via WhatsApp com IA**
 
-CRM geográfico com inteligência comercial, mapas interativos, scoring de leads, gestão de pipeline, automações e IA — projetado para equipes que vendem soluções de CFTV, alarmes, controle de acesso e monitoramento 24 horas.
-
----
-
-## 📋 Funcionalidades Principais
-
-### MVP (v1.0)
-- ✅ **Login & Autenticação** — JWT + Refresh Token + RBAC (6 perfis)
-- ✅ **Dashboard** — 8 indicadores em tempo real + mapa interativo + leads em potencial
-- ✅ **Mapa Interativo** — Leaflet/OpenStreetMap com marcadores por segmento, clusters, busca
-- ✅ **Leads** — CRUD completo com 50+ campos, filtros avançados, geolocalização
-- ✅ **Score de Segurança** — Pontuação 0-100 com 20+ fatores configuráveis
-- ✅ **Pipeline CRM** — Kanban com 7 etapas e drag-and-drop
-- ✅ **Visitas** — Agendamento com status e localização
-- ✅ **Propostas** — Módulo completo com itens, valores e status
-- ✅ **Ligações** — Registro com resultado e próxima ação
-- ✅ **WhatsApp** — Botão com templates de mensagem
-- ✅ **Produtos & Serviços** — Catálogo de segurança eletrônica
-- ✅ **Clientes** — Conversão de lead para cliente
-- ✅ **Equipe** — Gestão com ranking e produtividade
-- ✅ **Metas** — Por vendedor, equipe e mês
-- ✅ **Relatórios** — Gráficos com exportação (Excel, CSV, PDF)
-- ✅ **IA Comercial** — Recomendações, rota inteligente, ranking de regiões
-- ✅ **Notificações** — Alertas inteligentes
-
-### Futuro (v2.0+)
-- 🔜 Mapa de calor avançado
-- 🔜 Rota inteligente com IA
-- 🔜 WhatsApp Business API oficial
-- 🔜 Machine Learning para previsão de conversão
-- 🔜 Assinatura digital de propostas
-- 🔜 Automações de follow-up
-- 🔜 Inteligência de mercado territorial
+[![Next.js](https://img.shields.io/badge/Next.js-14.2-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![NestJS](https://img.shields.io/badge/NestJS-10.4-E0234E?style=for-the-badge&logo=nestjs)](https://nestjs.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-3.4-38B2AC?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com/)
+[![Prisma](https://img.shields.io/badge/Prisma-5.22-2D3748?style=for-the-badge&logo=prisma)](https://www.prisma.io/)
+[![Vercel](https://img.shields.io/badge/Deploy-Vercel-black?style=for-the-badge&logo=vercel)](https://radar-de-oportunidades-virid.vercel.app)
 
 ---
 
-## 🏗️ Arquitetura
+## 🌐 Demonstração Online & Ambientes
 
-```
-radar-de-oportunidades/
-├── apps/
-│   ├── web/            → Next.js 14 (React, TypeScript, Tailwind, Shadcn/UI)
-│   ├── api/            → NestJS (TypeScript, Prisma, PostgreSQL/PostGIS)
-│   └── ai-service/     → FastAPI (Python, Pandas, Scikit-learn)
-├── packages/
-│   ├── database/       → Prisma schema, migrations, seeds
-│   ├── types/          → TypeScript shared types/interfaces
-│   ├── config/         → Shared configuration
-│   └── utils/          → Shared utilities
-├── docker/
-│   └── postgres/       → PostgreSQL + PostGIS init scripts
-├── docker-compose.yml  → PostgreSQL + PostGIS + Redis
-└── turbo.json          → Turborepo monorepo config
-```
+- **Ambiente de Produção (Vercel)**: [https://radar-de-oportunidades-virid.vercel.app](https://radar-de-oportunidades-virid.vercel.app)
+- **Painel CRM Comercial**: `/pipeline`
+- **Fluxos de Conversação & Modelos**: `/flows`
+- **Gestão de Usuários & Meu Perfil**: `/users`
 
 ---
 
-## 🚀 Quick Start
+## 💡 Visão Geral da Plataforma
 
-### Pré-requisitos
-
-- [Node.js](https://nodejs.org/) >= 20.0
-- [Docker](https://www.docker.com/) & Docker Compose
-- [Python](https://www.python.org/) >= 3.11 (para o serviço de IA)
-
-### 1. Clone e configure
-
-```bash
-git clone <repo-url> radar-de-oportunidades
-cd radar-de-oportunidades
-
-# Copie as variáveis de ambiente
-cp .env.example .env
-```
-
-### 2. Inicie os serviços de infraestrutura
-
-```bash
-# Sobe PostgreSQL + PostGIS + Redis
-docker-compose up -d
-
-# Aguarde os serviços ficarem saudáveis
-docker-compose ps
-```
-
-### 3. Instale dependências e configure o banco
-
-```bash
-# Instale todas as dependências do monorepo
-npm install
-
-# Gere o Prisma Client
-npm run db:generate
-
-# Execute as migrations
-npm run db:migrate
-
-# Popule com dados de demonstração
-npm run db:seed
-```
-
-### 4. Inicie o serviço de IA (Python)
-
-```bash
-cd apps/ai-service
-python -m venv venv
-source venv/bin/activate  # ou venv\Scripts\activate no Windows
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
-
-### 5. Inicie a API e o Frontend
-
-```bash
-# Na raiz do projeto (em terminais separados)
-cd apps/api && npm run start:dev    # API em http://localhost:3001
-cd apps/web && npm run dev           # Frontend em http://localhost:3000
-```
-
-### 6. Acesse o sistema
-
-Abra **http://localhost:3000** no navegador.
+O **Radar de Oportunidades PRO** é uma solução completa de engenharia de software voltada para captação comercial B2B de alto volume. O sistema integra prospecção territorial através do Google Maps e OpenStreetMap, verificação em lote de números ativos de WhatsApp, funil de vendas (CRM) visual estilo Kanban, chatbot de atendimento com 15 modelos de segmentos de mercado pré-configurados e simulação virtual em smartphone para testes pré-disparo.
 
 ---
 
-## 🔑 Credenciais de Demonstração
+## 🚀 Principais Módulos & Capacidades
 
-| Perfil | Email | Senha |
-|--------|-------|-------|
-| Administrador | admin@radar.com | radar123 |
-| Gestor | gestor@radar.com | radar123 |
-| Vendedor | carlos@radar.com | radar123 |
-| Vendedor | rafael@radar.com | radar123 |
-| Vendedor | andre@radar.com | radar123 |
-| Vendedor | lucas@radar.com | radar123 |
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        RADAR DE OPORTUNIDADES                          │
+└──────┬────────────────────┬────────────────────┬────────────────────┬──┘
+       │                    │                    │                    │
+       ▼                    ▼                    ▼                    ▼
+ 🗺️ PROSPECÇÃO        🤖 DISPARADOR        💬 ATENDIMENTO       📊 CRM FUNIL
+ ├ Google Places      ├ Baileys Engine     ├ 15 Nichos B2B      ├ Kanban 7 Etapas
+ ├ Extração Telefones ├ Spintax Anti-Ban   ├ Celular Virtual    ├ Ticket Médio
+ ├ Filtro Sem Whats   ├ Delays Aleatórios  ├ Regras de FAQ      ├ Drag & Drop
+ └ Lista Fria Leads   └ Transbordo Humano  └ Variáveis Dinâmicas└ Gestão Contratos
+```
+
+### 1. 🗺️ Prospecção Territorial & Inteligência de Leads
+- **Importação Direta do Google Maps & OpenStreetMap**: busca por nicho e cidade/bairro com extração automática de razão social, telefones, endereços e avaliação de clientes.
+- **Mapeador Inteligente de WhatsApp**: algoritmo que higieniza números e separa automaticamente telefones fixos daqueles com WhatsApp ativo.
+- **Sistema de Pastas Dinâmicas & Lista Fria**: isolamento automático de leads sem resposta para reaquecimento programado.
+
+### 2. 🤖 Automação & Robô de WhatsApp (Baileys Engine)
+- **Sessão Persistente**: conexão via QR Code de alta disponibilidade que não desconecta ao recarregar a página ou navegar pela plataforma.
+- **Spintax Nativo Anti-Bloqueio**: variação automática de mensagens (`{Olá|Oi|Tudo bem?}`) para proteger os chips contra banimentos.
+- **Delays Humanos & Digitação Realista**: intervalos aleatórios entre mensagens simulando digitação humana.
+- **Transbordo Imediato para Humano**: o robô pausa o atendimento autônomo assim que um operador assume a conversa ou o cliente demonstra alto interesse comercial.
+
+### 3. 💬 Fluxos de Conversa & Chatbot para Múltiplas Empresas (`/flows`)
+- **Organização em Colunas no Padrão do Sistema**: grade limpa e responsiva de 3 colunas exibindo os 15 modelos de segmentos comerciais lado a lado.
+- **15 Modelos Comerciais Prontos**:
+  1. 🩺 Clínica & Consultório Médico / Odontológico
+  2. 🐾 Pet Shop & Clínica Veterinária
+  3. 💻 Empresa de TI, Sites & Sistemas
+  4. 🏢 Imobiliária & Corretores de Imóveis
+  5. 🍕 Restaurante, Pizzaria & Delivery
+  6. ⚖️ Escritório de Advocacia & Assessoria Jurídica
+  7. 📊 Contabilidade, Fiscal & Abertura de Empresas
+  8. 🚗 Oficina Mecânica & Auto Center
+  9. 💅 Salão de Beleza, Estética & Barbearia
+  10. 🛍️ Loja de Roupas, Calçados & Moda
+  11. 🏋️‍♂️ Academia, Crossfit & Studio Fitness
+  12. ☀️ Energia Solar & Engenharia Elétrica
+  13. 🎓 Cursos, Idiomas & Treinamentos
+  14. 🛡️ Segurança Eletrônica, CFTV & Alarmes
+  15. 🧹 Limpeza, Dedetização & Serviços Prediais
+- **Simulador de WhatsApp em Celular Virtual**: smartphone interativo embutido na tela para testar perguntas, respostas e alternativas antes de iniciar disparos reais.
+- **Regras de Resposta Rápida (FAQ)**: respostas automáticas para dúvidas frequentes de preço, endereço, formas de pagamento e horários.
+
+### 4. 📊 CRM Comercial Funil de Vendas (`/pipeline`)
+- **Quadro Kanban com 7 Etapas**: Novo Lead, Qualificado, Contato Realizado, Visita Agendada, Proposta Enviada, Negociação e Contrato Fechado.
+- **Métricas em Tempo Real**: Total de Oportunidades no CRM, Valor Estimado da Carteira e Ticket Médio.
+- **Ações Rápidas**: criação e avanço de oportunidades com drag-and-drop e modal completo de histórico.
+
+### 5. 👤 Central de Usuários & Meu Perfil (`/users`)
+- **Foto de Perfil com Upload & Preview**: envie fotos no formato PNG, JPG ou WebP de até 5MB. A imagem substitui o avatar em toda a plataforma.
+- **Troca de Nome & Cargo**: altere sua identificação a qualquer momento com sincronização instantânea.
+- **Segurança & Troca de Senha**: redefinição de senha com verificação de segurança, validação de caracteres e botão de visualização rápida.
+- **Acesso com 1 Clique**: clique diretamente no card do usuário no rodapé da barra lateral ou na tela de Usuários.
+
+---
+
+## 📈 Linha do Tempo da Experiência & Evolução Técnica
+
+```mermaid
+timeline
+    title Linha do Tempo de Desenvolvimento do Radar de Oportunidades
+    Fase 1 - Fundação : Arquitetura Monorepo Turbo : Modelagem de Dados com Prisma : Dashboard com Métricas e Mapa
+    Fase 2 - Motor WhatsApp : Integração Baileys : QR Code Dinâmico e Reconexão : Sistema Anti-Queda no F5
+    Fase 3 - Prospecção em Massa : Extração via Google Maps API : Higienização de Números : Pastas de Leads e Lista Fria
+    Fase 4 - Chatbot Multitenant : Engine de Fluxos Conversacionais : 15 Segmentos Comerciais Prontos : Simulador de Smartphone Virtual
+    Fase 5 - UX/UI & Gestão : Visualização em 3 Colunas : Renomeação para CRM : Central de Perfil com Foto, Nome e Senha
+```
+
+### 🗓️ Marco 1: Arquitetura & Base de Dados
+- Configuração do monorepo Turborepo com `@radar/types`, NestJS API e Next.js 14 App Router.
+- Modelagem de entidades no Prisma (Leads, Contatos, Endereços, Funil CRM, Usuários e Permissões RBAC).
+- Painel de métricas analíticas e geolocalização de oportunidades.
+
+### 🗓️ Marco 2: Engenharia de Conexão WhatsApp (Baileys)
+- Eliminação de dependência de APIs pagas de terceiros através da implementação direta da biblioteca Baileys.
+- Implementação de persistência da sessão em disco (`auth_info_baileys`) com rotação de chaves.
+- Resolução do problema de despareamento involuntário em recarregamentos (F5) e tratamento de reconexão automática resiliente.
+
+### 🗓️ Marco 3: Mapeamento de Clientes & Proteção de Disparos
+- Criação do buscador territorial integrado ao Google Places e fontes abertas.
+- Sistema de verificação de telefones que isola números fixos ou sem WhatsApp da fila de disparo.
+- Painel de segurança com controle de cadência de envio, limite de mensagens diárias e atrasos randômicos.
+
+### 🗓️ Marco 4: Chatbot Multitenant & 15 Segmentos Prontos
+- Criação da máquina de estados para fluxos de atendimento (`bot-flow.service.ts`).
+- Desenvolvimento de 15 árvores de conversação cobrindo os maiores nichos empresariais do mercado brasileiro.
+- Criação de um smartphone virtual na interface para homologação prévia das etapas do robô sem custo de envio.
+
+### 🗓️ Marco 5: Experiência Visual, CRM & Gestão de Contas
+- Ajuste do layout de modelos em 3 colunas limpas, eliminando barras de rolagem horizontais.
+- Unificação e renomeação do antigo pipeline comercial para CRM de Vendas.
+- Implementação de upload de foto de perfil em Base64, personalização de nome e redefinição de senha com persistência em armazenamento seguro.
 
 ---
 
 ## 🛠️ Stack Tecnológica
 
-### Front-end
-| Tecnologia | Versão | Uso |
-|-----------|--------|-----|
-| Next.js | 14 | Framework React com App Router |
-| React | 18 | Biblioteca UI |
-| TypeScript | 5.5 | Tipagem estática |
-| Tailwind CSS | 3.4 | Estilos utilitários |
-| Shadcn/UI | - | Componentes de interface |
-| Recharts | 2 | Gráficos e visualizações |
-| Leaflet | 1.9 | Mapas interativos |
-| Zustand | 4 | Gerenciamento de estado |
-| TanStack Query | 5 | Cache e fetch de dados |
-
-### Back-end
-| Tecnologia | Versão | Uso |
-|-----------|--------|-----|
-| NestJS | 10 | Framework API |
-| Prisma | 5 | ORM com PostgreSQL |
-| PostgreSQL | 16 | Banco de dados |
-| PostGIS | 3.4 | Extensão geoespacial |
-| Redis | 7 | Cache |
-| JWT | - | Autenticação |
-| bcrypt | - | Criptografia de senhas |
-
-### IA & Dados
-| Tecnologia | Versão | Uso |
-|-----------|--------|-----|
-| Python | 3.11 | Linguagem |
-| FastAPI | 0.110 | Framework API |
-| Pandas | 2 | Manipulação de dados |
-| Scikit-learn | 1.5 | Machine Learning |
-| NumPy | 1.26 | Computação numérica |
+| Camada | Tecnologias Utilizadas |
+|---|---|
+| **Frontend** | Next.js 14 (App Router), React 18, Tailwind CSS, Lucide Icons, Zustand, React Hot Toast |
+| **Backend** | NestJS 10, TypeScript, RxJS, Swagger / OpenAPI |
+| **Mensageria** | @whiskeysockets/baileys, Spintax Parser, WebSocket / Polling |
+| **Banco de Dados** | Prisma ORM, SQLite (local) / PostgreSQL (cloud) |
+| **Geolocalização** | Google Places API, Leaflet, OpenStreetMap |
+| **Monorepo & Build** | Turborepo, NPM Workspaces |
+| **Hospedagem & CI/CD** | Vercel (Web Serverless), Node.js Runtime (Local API) |
 
 ---
 
-## 📊 Banco de Dados
+## 🔒 Segurança & Boas Práticas
 
-O schema contém **32 tabelas** com suporte a PostGIS para geolocalização:
-
-- **Autenticação**: users, roles, permissions, role_permissions
-- **Segmentos**: segments (22 categorias de negócio)
-- **Leads & CRM**: leads, contacts, addresses, scores, score_rules, score_factors
-- **Pipeline**: pipelines, pipeline_stages
-- **Interações**: activities, calls, messages, visits
-- **Comercial**: proposals, proposal_items, products, services
-- **Clientes**: customers, contracts
-- **Equipe**: teams, goals, sales
-- **Sistema**: tasks, notifications, attachments, audit_logs
-
-### Consultas Geoespaciais (PostGIS)
-
-```sql
--- Leads em um raio de 5km
-SELECT * FROM leads l
-JOIN addresses a ON a.lead_id = l.id
-WHERE ST_DWithin(
-  ST_MakePoint(a.longitude, a.latitude)::geography,
-  ST_MakePoint(-46.6333, -23.5505)::geography,
-  5000
-);
-
--- Distância entre vendedor e lead
-SELECT ST_Distance(
-  ST_MakePoint(-46.6333, -23.5505)::geography,
-  ST_MakePoint(a.longitude, a.latitude)::geography
-) / 1000 as distance_km
-FROM addresses a;
-```
+- **Proteção de Credenciais**: As senhas de acesso utilizam criptografia irreversível via `bcrypt` com salt rounds elevados.
+- **Isolamento de Sessões Baileys**: As chaves criptográficas da sessão do WhatsApp são mantidas exclusivamente no dispositivo local e protegidas pelo `.gitignore`.
+- **Zero Vazamento de Segredos**: Arquivos de ambiente e logs operacionais são desconsiderados do controle de versão.
 
 ---
 
-## 🔒 Segurança
+## 💻 Como Rodar o Projeto Localmente
 
-- Senhas criptografadas com **bcrypt** (salt rounds: 12)
-- Autenticação via **JWT** (access token: 15min, refresh token: 7 dias)
-- **RBAC** com 6 perfis e permissões granulares
-- **Rate Limiting** (100 req/min geral, 5 req/min login)
-- **CORS** configurado por origem
-- **Helmet** para headers de segurança
-- **Validação** com class-validator em todos os endpoints
-- **SQL Injection** prevenido pelo Prisma (queries parametrizadas)
-- **Audit Log** em todas as operações de escrita
-- **LGPD** com soft delete e exportação de dados
+### Pré-requisitos
+- [Node.js](https://nodejs.org/) versão 20 ou superior
+- Gerenciador de pacotes `npm`
+
+### 1. Clonar o Repositório
+```bash
+git clone https://github.com/WevcastDEV/radar.git
+cd radar
+```
+
+### 2. Instalar Dependências
+```bash
+npm install
+```
+
+### 3. Configurar Variáveis de Ambiente
+```bash
+cp .env.example .env
+```
+
+### 4. Iniciar a Plataforma
+No Windows, execute o inicializador automatizado:
+```cmd
+INICIAR.bat
+```
+Ou manualmente via terminal:
+```bash
+# Terminal 1 - Backend API (porta 3001)
+cd apps/api
+npm run start
+
+# Terminal 2 - Frontend Next.js (porta 3000)
+cd apps/web
+npm run dev
+```
+
+Acesse no seu navegador: [http://localhost:3000](http://localhost:3000)
 
 ---
 
-## 📡 API Endpoints
+## 👨‍💻 Autor & Manutenção
 
-### Autenticação
-```
-POST /api/auth/login        → Login com email/senha
-POST /api/auth/refresh      → Renovar token
-POST /api/auth/logout       → Logout
-```
-
-### Leads
-```
-GET    /api/leads            → Listar com filtros e paginação
-POST   /api/leads            → Criar lead
-GET    /api/leads/:id        → Detalhes do lead
-PUT    /api/leads/:id        → Atualizar lead
-DELETE /api/leads/:id        → Remover lead (soft delete)
-GET    /api/leads/nearby     → Leads próximos (PostGIS)
-GET    /api/leads/high-score → Leads com score alto
-```
-
-### Mapa
-```
-GET /api/map/markers   → Marcadores para o mapa
-GET /api/map/heatmap   → Dados de mapa de calor
-GET /api/map/clusters  → Dados clusterizados
-```
-
-### Dashboard & Pipeline
-```
-GET /api/dashboard/stats → Indicadores do dashboard
-GET /api/pipeline        → Pipeline com estágios e leads
-PUT /api/pipeline/move   → Mover lead no pipeline
-```
-
-### CRM
-```
-POST /api/calls      → Registrar ligação
-POST /api/visits     → Agendar visita
-POST /api/proposals  → Criar proposta
-```
-
-### IA Comercial
-```
-POST /api/ai/recommendations → Recomendações de prospecção
-POST /api/ai/route           → Rota inteligente otimizada
-GET  /api/ai/regions         → Ranking de regiões
-```
-
----
-
-## 📝 Licença
-
-Este projeto é proprietário. Todos os direitos reservados.
-
----
-
-## 👥 Equipe
-
-Desenvolvido como plataforma comercial para equipes de vendas de segurança eletrônica.
-
----
-
-*Radar de Oportunidades © 2024 — Plataforma SaaS de Prospecção Comercial*
+Desenvolvido e mantido por **Weverton (WCTECH)**  
+- GitHub: [@WevcastDEV](https://github.com/WevcastDEV)
+- Plataforma: [Radar de Oportunidades PRO](https://radar-de-oportunidades-virid.vercel.app)

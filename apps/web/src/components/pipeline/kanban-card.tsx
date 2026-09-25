@@ -1,11 +1,10 @@
 'use client';
 
-import { LeadListItem, PipelineStageData } from '@radar/types';
+import { LeadListItem, PipelineStageData, SCORE_COLORS } from '@radar/types';
 import { Card } from '@/components/ui/card';
 import { formatCurrency } from '@/lib/utils';
-import { SCORE_COLORS } from '@radar/types';
-import { Phone, ChevronRight, ChevronLeft, ExternalLink, MapPin, Building } from 'lucide-react';
-import Link from 'next/link';
+import { formatBrazilianPhone, toWhatsAppJidDigits } from '@/lib/phone-utils';
+import { Phone, ChevronRight, ChevronLeft, MapPin, Building, User, FileText, Sparkles } from 'lucide-react';
 
 interface KanbanCardProps {
   lead: LeadListItem;
@@ -14,6 +13,7 @@ interface KanbanCardProps {
   nextStage?: PipelineStageData;
   onDragStart: (e: React.DragEvent) => void;
   onMoveStage?: (leadId: string, targetStageId: string) => void;
+  onSelectLead?: (lead: LeadListItem) => void;
 }
 
 export function KanbanCard({ 
@@ -22,49 +22,64 @@ export function KanbanCard({
   prevStage,
   nextStage,
   onDragStart,
-  onMoveStage 
+  onMoveStage,
+  onSelectLead,
 }: KanbanCardProps) {
   const priorityColor = SCORE_COLORS[lead.score?.level || 'LOW'] || '#3B82F6';
   
   // Format WhatsApp number
-  const rawPhone = ((lead as any).phone || '').replace(/\D/g, '');
-  const cleanPhone = rawPhone.length === 10 || rawPhone.length === 11 ? `55${rawPhone}` : rawPhone;
-  const whatsappUrl = cleanPhone ? `https://wa.me/${cleanPhone}` : null;
+  const phoneVal = (lead as any).phone || (lead as any).contacts?.[0]?.value || '';
+  const rawDigits = phoneVal.replace(/\D/g, '');
+  const cleanDigits = toWhatsAppJidDigits(rawDigits);
+  const firstName = ((lead as any).contactName || lead.name).split(' ')[0];
+  const defaultWhatsAppMessage = encodeURIComponent(
+    `Olá ${firstName}! Tudo bem? Aqui é o Weverton da WCTech. Gostaria de falar sobre as soluções para a ${lead.name}.`
+  );
+  const whatsappUrl = cleanDigits ? `https://wa.me/${cleanDigits}?text=${defaultWhatsAppMessage}` : null;
+  const notesText = (lead as any).notes;
+  const contactName = (lead as any).contactName;
 
   return (
     <Card 
-      className="p-3 cursor-grab active:cursor-grabbing hover:border-primary/50 transition-all bg-card relative overflow-hidden group shadow-sm hover:shadow-md"
+      className="p-3 cursor-pointer hover:border-primary/50 transition-all bg-card relative overflow-hidden group shadow-sm hover:shadow-md select-none"
       draggable
       onDragStart={onDragStart}
+      onClick={() => onSelectLead?.(lead)}
     >
-      {/* Priority Indicator Bar */}
+      {/* Barra de Prioridade Lateral */}
       <div 
-        className="absolute left-0 top-0 bottom-0 w-1" 
+        className="absolute left-0 top-0 bottom-0 w-1.5" 
         style={{ backgroundColor: priorityColor }} 
       />
       
       <div className="pl-2 space-y-2">
-        {/* Header: Title and Link to Details */}
+        {/* Topo: Nome da Empresa e Score */}
         <div className="flex justify-between items-start gap-1">
-          <Link 
-            href={`/leads/${lead.id}`}
-            className="font-bold text-xs text-foreground hover:text-primary transition-colors truncate max-w-[85%] flex items-center gap-1"
-            title="Ver detalhes do lead"
-          >
-            <span>{lead.name}</span>
-            <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-          </Link>
+          <div className="min-w-0 flex-1">
+            <h4 
+              className="font-bold text-xs text-foreground group-hover:text-primary transition-colors truncate"
+              title={lead.name}
+            >
+              {lead.name}
+            </h4>
+            {contactName && (
+              <p className="text-[10px] text-muted-foreground flex items-center gap-1 truncate mt-0.5">
+                <User className="w-2.5 h-2.5 shrink-0 text-muted-foreground/70" />
+                <span className="truncate">{contactName}</span>
+              </p>
+            )}
+          </div>
 
           <div 
-            className="w-5 h-5 rounded-full border flex items-center justify-center text-[9px] font-black shrink-0"
-            style={{ borderColor: priorityColor, color: priorityColor }}
+            className="w-5 h-5 rounded-full border flex items-center justify-center text-[9px] font-black shrink-0 shadow-sm"
+            style={{ borderColor: priorityColor, color: priorityColor, backgroundColor: `${priorityColor}15` }}
             title={`Score do Lead: ${lead.score?.total || 0} pts`}
           >
             {lead.score?.total || 0}
           </div>
         </div>
         
-        {/* Category Badge & Address */}
+        {/* Badges de Segmento e Cidade */}
         <div className="flex flex-wrap items-center gap-1.5">
           {lead.segment && (
             <span 
@@ -79,14 +94,25 @@ export function KanbanCard({
           )}
 
           {lead.address?.city && (
-            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5 truncate max-w-[140px]">
-              <MapPin className="w-2.5 h-2.5 shrink-0" />
+            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5 truncate max-w-[130px]">
+              <MapPin className="w-2.5 h-2.5 shrink-0 text-muted-foreground/70" />
               <span className="truncate">{lead.address.city}</span>
             </span>
           )}
         </div>
 
-        {/* Value and Phone Action */}
+        {/* Prévia de Anotações CRM se existirem */}
+        {notesText && (
+          <div 
+            className="text-[10px] text-muted-foreground/90 bg-accent/30 rounded-md px-2 py-1 flex items-start gap-1 line-clamp-1 border border-border/50"
+            title={notesText}
+          >
+            <FileText className="w-2.5 h-2.5 shrink-0 mt-0.5 text-primary/80" />
+            <span className="truncate">{notesText}</span>
+          </div>
+        )}
+
+        {/* Valor da Oportunidade e Botão WhatsApp */}
         <div className="flex justify-between items-center pt-1 border-t border-border/60 text-xs">
           <div className="font-bold text-foreground font-mono">
             {formatCurrency(lead.potentialValue || 0)}
@@ -98,8 +124,8 @@ export function KanbanCard({
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-500 text-[10px] font-bold flex items-center gap-1 transition-colors"
-              title="Abrir conversa no WhatsApp"
+              className="px-2 py-0.5 rounded bg-emerald-600/15 hover:bg-emerald-600/30 text-emerald-500 hover:text-emerald-400 text-[10px] font-bold flex items-center gap-1 transition-all border border-emerald-500/20 shadow-sm"
+              title="Abrir WhatsApp direto com mensagem de prospecção"
             >
               <Phone className="w-2.5 h-2.5" />
               <span>WhatsApp</span>
@@ -107,7 +133,7 @@ export function KanbanCard({
           )}
         </div>
 
-        {/* Quick Stage Progression Buttons */}
+        {/* Botões de Avanço de Etapa no Funil */}
         <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-border/40 text-[10px]">
           {prevStage ? (
             <button
@@ -116,7 +142,7 @@ export function KanbanCard({
                 e.stopPropagation();
                 onMoveStage?.(lead.id, prevStage.id);
               }}
-              className="px-1.5 py-1 rounded bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors"
+              className="px-1.5 py-1 rounded bg-secondary hover:bg-accent text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors border border-border/50"
               title={`Voltar para: ${prevStage.name}`}
             >
               <ChevronLeft className="w-3 h-3" />
@@ -131,15 +157,15 @@ export function KanbanCard({
                 e.stopPropagation();
                 onMoveStage?.(lead.id, nextStage.id);
               }}
-              className="px-2 py-1 rounded bg-primary/10 hover:bg-primary/20 text-primary font-bold flex items-center gap-0.5 transition-colors ml-auto shadow-sm"
+              className="px-2 py-1 rounded bg-primary/10 hover:bg-primary/20 text-primary font-bold flex items-center gap-0.5 transition-colors ml-auto shadow-sm border border-primary/30"
               title={`Avançar para: ${nextStage.name}`}
             >
               <span className="truncate max-w-[85px]">{nextStage.name}</span>
               <ChevronRight className="w-3 h-3" />
             </button>
           ) : (
-            <span className="text-[9px] text-emerald-500 font-bold ml-auto px-1.5 py-0.5 bg-emerald-500/10 rounded">
-              ✓ Concluído
+            <span className="text-[9px] text-emerald-400 font-bold ml-auto px-1.5 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/30">
+              ✓ Ganho / Fechado
             </span>
           )}
         </div>

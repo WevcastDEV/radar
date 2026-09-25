@@ -1,6 +1,6 @@
 'use client';
 
-import { PipelineStageData } from '@radar/types';
+import { PipelineStageData, LeadListItem } from '@radar/types';
 import { KanbanColumn } from './kanban-column';
 import { useState } from 'react';
 
@@ -8,9 +8,17 @@ interface KanbanBoardProps {
   stages: PipelineStageData[];
   onDragEnd: (leadId: string, stageId: string) => void;
   onMoveStage?: (leadId: string, stageId: string) => void;
+  onSelectLead?: (lead: LeadListItem) => void;
+  onAddLeadToStage?: (stageId: string) => void;
 }
 
-export function KanbanBoard({ stages, onDragEnd, onMoveStage }: KanbanBoardProps) {
+export function KanbanBoard({ 
+  stages, 
+  onDragEnd, 
+  onMoveStage,
+  onSelectLead,
+  onAddLeadToStage,
+}: KanbanBoardProps) {
   const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
 
   const handleDragStart = (e: React.DragEvent, leadId: string) => {
@@ -48,6 +56,8 @@ export function KanbanBoard({ stages, onDragEnd, onMoveStage }: KanbanBoardProps
             onDrop={(e) => handleDrop(e, stage.id)}
             onDragOver={handleDragOver}
             onMoveStage={onMoveStage || onDragEnd}
+            onSelectLead={onSelectLead}
+            onAddLeadToStage={onAddLeadToStage}
             isDragging={!!draggedLeadId}
           />
         );

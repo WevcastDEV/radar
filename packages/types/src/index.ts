@@ -216,6 +216,11 @@ export interface LeadListItem {
   lastContactAt?: string;
   distance?: number;
   createdAt: string;
+  phone?: string;
+  hasWhatsApp?: boolean;
+  noWhatsApp?: boolean;
+  isLandline?: boolean;
+  whatsappStatus?: 'ACTIVE' | 'NO_WHATSAPP' | 'UNVERIFIED';
 }
 
 export interface LeadDetail extends LeadListItem {

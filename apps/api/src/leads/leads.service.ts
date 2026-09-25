@@ -11,12 +11,25 @@ export class LeadsService {
 
   async create(dto: CreateLeadDto) {
     const { address, ...leadData } = dto;
+
+    let stageId = (leadData as any).pipelineStageId;
+    if (!stageId) {
+      const defaultStage = await this.prisma.pipelineStage.findFirst({
+        where: { pipeline: { isDefault: true } },
+        orderBy: { order: 'asc' },
+      });
+      if (defaultStage) {
+        stageId = defaultStage.id;
+      }
+    }
+
     return this.prisma.lead.create({
       data: {
         ...leadData,
+        pipelineStageId: stageId,
         address: address ? { create: address } : undefined,
       },
-      include: { address: true }
+      include: { address: true, segment: true, score: true, contacts: true }
     });
   }
 
@@ -25,33 +38,57 @@ export class LeadsService {
     
     if (filters.search) {
       where.OR = [
-        { name: { contains: filters.search, mode: 'insensitive' } },
-        { companyName: { contains: filters.search, mode: 'insensitive' } },
+        { name: { contains: filters.search } },
+        { companyName: { contains: filters.search } },
         { cnpj: { contains: filters.search } }
       ];
     }
     if (filters.city) {
-      where.address = { city: { contains: filters.city, mode: 'insensitive' } };
+      where.address = { city: { contains: filters.city } };
     }
     if (filters.status) where.status = filters.status;
     if (filters.segmentId) where.segmentId = filters.segmentId;
 
     if (filters.latitude && filters.longitude && filters.radiusKm) {
-      const radiusMeters = filters.radiusKm * 1000;
-      const leads = await this.prisma.$queryRaw`
-        SELECT l.*, a.latitude, a.longitude 
-        FROM leads l
-        LEFT JOIN addresses a ON l.id = a.lead_id
-        WHERE l.deleted_at IS NULL
-          AND a.latitude IS NOT NULL
-          AND a.longitude IS NOT NULL
-          AND ST_DWithin(
-            ST_SetSRID(ST_MakePoint(a.longitude, a.latitude), 4326)::geography,
-            ST_SetSRID(ST_MakePoint(${filters.longitude}, ${filters.latitude}), 4326)::geography,
-            ${radiusMeters}
-          )
-      `;
-      return leads;
+      const allLeads = await this.prisma.lead.findMany({
+        where: {
+          ...where,
+          address: {
+            ...((where.address as any) || {}),
+            latitude: { not: null },
+            longitude: { not: null },
+          },
+        },
+        include: {
+          segment: true,
+          address: true,
+          score: true,
+          contacts: true,
+          responsible: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const R = 6371; // Raio da Terra em km
+      const lat1 = filters.latitude;
+      const lon1 = filters.longitude;
+
+      return allLeads.filter((l) => {
+        if (!l.address?.latitude || !l.address?.longitude) return false;
+        const lat2 = l.address.latitude;
+        const lon2 = l.address.longitude;
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distanceKm = R * c;
+        return distanceKm <= (filters.radiusKm || 0);
+      });
     }
 
     return this.prisma.lead.findMany({
@@ -60,6 +97,7 @@ export class LeadsService {
         segment: true,
         address: true,
         score: true,
+        contacts: true,
         responsible: { select: { id: true, name: true } }
       },
       orderBy: { createdAt: 'desc' }

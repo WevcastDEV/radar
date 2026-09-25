@@ -3,16 +3,28 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { getTokens } from '@/lib/auth';
+import { getOrCreateDeviceId } from '@/lib/device-id';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { getBaseApiUrl } from '@/lib/api';
 
 export const whatsappApi = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api',
-  timeout: 8000,
+  baseURL: getBaseApiUrl(),
+  timeout: 10000,
 });
+
 whatsappApi.interceptors.request.use(config => {
+  if (typeof window !== 'undefined') {
+    if (window.location.protocol === 'https:' || !process.env.NEXT_PUBLIC_API_URL) {
+      config.baseURL = '/api';
+    }
+  }
   const token = getTokens()?.accessToken;
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  try {
+    const did = getOrCreateDeviceId();
+    if (did) config.headers['x-device-id'] = did;
+  } catch {}
   return config;
 });
 

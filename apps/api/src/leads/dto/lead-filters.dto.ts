@@ -1,6 +1,6 @@
 import { IsOptional, IsString, IsNumber, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
-import { LeadStatus, Priority } from '@prisma/client';
+import { LeadStatus, Priority } from '../../common/enums';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class LeadFiltersDto {
