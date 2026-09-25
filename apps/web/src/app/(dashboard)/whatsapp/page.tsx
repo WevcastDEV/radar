@@ -289,6 +289,7 @@ export default function WhatsAppBotPage() {
     return { connected: false, qrCode: null, autoReplyEnabled: true, cordialityEnabled: true };
   });
   const [isCheckingBot, setIsCheckingBot] = useState(false);
+  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
   const [isTogglingAutoReply, setIsTogglingAutoReply] = useState(false);
   const [isTogglingCordiality, setIsTogglingCordiality] = useState(false);
 
@@ -496,12 +497,12 @@ export default function WhatsAppBotPage() {
   }, []);
 
   // Monitoramento dinâmico do status do WhatsApp:
-  // Rápido (a cada 2.5s) quando desconectado para exibir o QR Code instantaneamente
-  // A cada 10s quando já pareado/conectado
+  // Executa em segundo plano de forma silenciosa (sem piscar a interface)
+  // Intervalo de 6s quando desconectado e 15s quando conectado
   useEffect(() => {
-    checkBotStatus();
-    const pollInterval = botStatus.connected ? 10000 : 2500;
-    const interval = setInterval(checkBotStatus, pollInterval);
+    checkBotStatus({ manual: false });
+    const pollInterval = botStatus.connected ? 15000 : 6000;
+    const interval = setInterval(() => checkBotStatus({ manual: false }), pollInterval);
     return () => clearInterval(interval);
   }, [botStatus.connected]);
 
@@ -648,17 +649,20 @@ export default function WhatsAppBotPage() {
     }
   };
 
-  const checkBotStatus = async () => {
-    setIsCheckingBot(true);
+  const checkBotStatus = async (options?: { manual?: boolean }) => {
+    const isManual = options?.manual === true;
+    if (isManual) {
+      setIsCheckingBot(true);
+    }
     try {
       let data: any = null;
 
       // 1. Consulta o proxy oficial /api/whatsapp/status
       try {
-        const res = await axios.get('/whatsapp/status', { timeout: 4000 });
+        const res = await axios.get('/whatsapp/status', { timeout: 3000 });
         data = res.data?.data || res.data;
       } catch (err) {
-        console.warn('Proxy /whatsapp/status falhou temporariamente:', err);
+        // Silencioso
       }
 
       // 2. Se estiver na nuvem (Vercel) ou o proxy não tiver o robô ativo,
@@ -667,7 +671,7 @@ export default function WhatsAppBotPage() {
         try {
           const directRes = await fetch('http://127.0.0.1:3001/api/whatsapp/status', {
             headers: { 'x-device-id': deviceId || getOrCreateDeviceId() },
-            signal: AbortSignal.timeout(2000),
+            signal: AbortSignal.timeout(1200),
           });
           if (directRes.ok) {
             const directJson = await directRes.json();
@@ -681,31 +685,51 @@ export default function WhatsAppBotPage() {
       }
 
       if (data && typeof data.connected === 'boolean') {
-        if (data.connected) {
-          try {
-            localStorage.setItem('radar_whatsapp_bot_status_cache', JSON.stringify({ connected: true }));
-          } catch {}
-          setBotStatus(prev => ({ ...prev, ...data }));
-        } else if (data.qrCode) {
-          // Apenas se tiver um QR Code novo para ler consideramos desconectado
-          try {
-            localStorage.removeItem('radar_whatsapp_bot_status_cache');
-          } catch {}
-          setBotStatus(prev => ({ ...prev, ...data, connected: false }));
-        } else {
-          // Se não tiver QR code gerado, mantém o estado anterior para não piscar no F5
-          setBotStatus(prev => ({ ...prev, ...data, connected: prev.connected }));
-        }
+        setBotStatus(prev => {
+          const nextConnected = Boolean(data.connected);
+          const nextQr = data.qrCode || null;
+          const nextAutoReply = data.autoReplyEnabled ?? prev.autoReplyEnabled;
+          const nextCordiality = data.cordialityEnabled ?? prev.cordialityEnabled;
+
+          // Se nada mudou, mantém a mesma referência do objeto para o React não re-renderizar nem piscar a tela
+          if (
+            prev.connected === nextConnected &&
+            prev.qrCode === nextQr &&
+            prev.autoReplyEnabled === nextAutoReply &&
+            prev.cordialityEnabled === nextCordiality
+          ) {
+            return prev;
+          }
+
+          if (nextConnected) {
+            try {
+              localStorage.setItem('radar_whatsapp_bot_status_cache', JSON.stringify({ connected: true }));
+            } catch {}
+          } else if (nextQr) {
+            try {
+              localStorage.removeItem('radar_whatsapp_bot_status_cache');
+            } catch {}
+          }
+
+          return {
+            ...prev,
+            ...data,
+            connected: nextConnected,
+            qrCode: nextQr,
+          };
+        });
       }
     } catch (e) {
-      console.warn('Verificação de status temporariamente indisponível:', e);
+      // Silencioso
     } finally {
-      setIsCheckingBot(false);
+      if (isManual) {
+        setIsCheckingBot(false);
+      }
     }
   };
 
   const handleReconnectBot = async (forceNewSession = true) => {
-    setIsCheckingBot(true);
+    setIsGeneratingQr(true);
     try {
       setBotStatus(prev => ({ ...prev, connected: false, qrCode: null }));
       
@@ -716,21 +740,20 @@ export default function WhatsAppBotPage() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-device-id': deviceId || getOrCreateDeviceId() },
             body: JSON.stringify({ forceNewSession }),
-            signal: AbortSignal.timeout(3000),
+            signal: AbortSignal.timeout(2000),
           }).catch(() => {})
         : Promise.resolve();
 
-      await Promise.race([Promise.all([p1, p2]), new Promise(r => setTimeout(r, 1500))]);
+      await Promise.race([Promise.all([p1, p2]), new Promise(r => setTimeout(r, 1200))]);
       
-      toast.success('Gerando novo QR Code... Aponte a câmera do celular!');
-      setTimeout(checkBotStatus, 1000);
-      setTimeout(checkBotStatus, 2200);
-      setTimeout(checkBotStatus, 4000);
-      setTimeout(checkBotStatus, 6000);
+      toast.success('Solicitação enviada! Gerando novo QR Code...');
+      setTimeout(() => checkBotStatus({ manual: false }), 1500);
+      setTimeout(() => checkBotStatus({ manual: false }), 3500);
+      setTimeout(() => checkBotStatus({ manual: false }), 6000);
     } catch (e) {
       toast.error('Não foi possível solicitar a reconexão.');
     } finally {
-      setIsCheckingBot(false);
+      setIsGeneratingQr(false);
     }
   };
 
@@ -753,8 +776,8 @@ export default function WhatsAppBotPage() {
         setBotStatus(prev => ({ ...prev, connected: false, qrCode: null }));
         await axios.post('/whatsapp/disconnect');
         toast.success('WhatsApp desconectado. A conexão só será iniciada novamente quando você solicitar.');
-        setTimeout(checkBotStatus, 1200);
-        setTimeout(checkBotStatus, 2500);
+        setTimeout(() => checkBotStatus({ manual: false }), 1200);
+        setTimeout(() => checkBotStatus({ manual: false }), 2500);
       } catch (e) {
         toast.error('Erro ao desconectar WhatsApp.');
       } finally {
@@ -2160,7 +2183,7 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                 Trocar Aparelho
               </Button>
             ) : (
-              <Button variant="ghost" size="sm" onClick={checkBotStatus} className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground">
+              <Button variant="ghost" size="sm" onClick={() => checkBotStatus({ manual: true })} className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground">
                 {isCheckingBot ? '...' : 'Atualizar'}
               </Button>
             )}
@@ -2206,13 +2229,13 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                   </div>
                 ) : (
                   <div className="mt-3 p-4 bg-amber-500/15 border border-amber-500/30 rounded-xl flex items-center gap-3 text-xs text-amber-300">
-                    <RefreshCw className={`w-5 h-5 shrink-0 text-amber-400 ${isCheckingBot ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`w-5 h-5 shrink-0 text-amber-400 ${isGeneratingQr ? 'animate-spin' : ''}`} />
                     <div>
                       <p className="font-semibold text-foreground">
-                        {isCheckingBot ? 'Gerando QR Code individual para este PC...' : 'QR Code aguardando sincronização'}
+                        {isGeneratingQr ? 'Gerando QR Code individual para este PC...' : 'QR Code aguardando sincronização'}
                       </p>
                       <p className="text-muted-foreground text-[11px]">
-                        {isCheckingBot 
+                        {isGeneratingQr 
                           ? 'O robô Baileys está se comunicando com o WhatsApp. O QR Code aparecerá aqui em instantes...' 
                           : 'Clique em "Gerar Novo QR Code" ao lado ou confirme se o INICIAR_RADAR.exe está ativo neste PC.'}
                       </p>
@@ -2227,19 +2250,21 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                 variant="outline"
                 size="sm"
                 onClick={() => handleReconnectBot(true)}
-                disabled={isCheckingBot}
+                disabled={isGeneratingQr}
                 className="gap-1.5 border-amber-500/40 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 text-xs font-semibold"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isCheckingBot ? 'animate-spin' : ''}`} />
-                {isCheckingBot ? 'Consultando conexão...' : 'Gerar Novo QR Code'}
+                <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingQr ? 'animate-spin' : ''}`} />
+                {isGeneratingQr ? 'Gerando QR Code...' : 'Gerar Novo QR Code'}
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={checkBotStatus}
-                className="text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => checkBotStatus({ manual: true })}
+                disabled={isCheckingBot}
+                className="gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               >
-                Verificar Status
+                {isCheckingBot && <RefreshCw className="w-3 h-3 animate-spin" />}
+                {isCheckingBot ? 'Verificando...' : 'Verificar Status'}
               </Button>
             </div>
           </CardContent>
