@@ -148,6 +148,31 @@ export class WhatsappService implements OnModuleInit {
   getSession(rawDeviceId?: string): DeviceSession {
     const deviceId = this.sanitizeDeviceId(rawDeviceId);
     let session = this.deviceSessions.get(deviceId);
+
+    // 1. Se a sessão solicitada já existe e está conectada, usa diretamente
+    if (session && session.isConnected && session.sock) {
+      return session;
+    }
+
+    // 2. Se a sessão solicitada não está conectada, procura se existe QUALQUER outra sessão no sistema que já esteja CONECTADA
+    for (const [id, active] of this.deviceSessions.entries()) {
+      if (active.isConnected && active.sock) {
+        return active;
+      }
+    }
+
+    // 3. Se a sessão solicitada já existe na memória, usa ela diretamente
+    if (session) {
+      return session;
+    }
+
+    // 4. Se a sessão não existe ainda, mas alguma outra sessão já tem QR Code ativo pronto
+    for (const [id, active] of this.deviceSessions.entries()) {
+      if (active.qrCode) {
+        return active;
+      }
+    }
+
     if (!session) {
       const authFolder = deviceId === 'default'
         ? path.join(process.cwd(), 'auth_info_baileys')
@@ -368,29 +393,44 @@ export class WhatsappService implements OnModuleInit {
     this.loadSdrConfig();
     this.logger.log('Inicializando motor do WhatsApp automaticamente...');
     setTimeout(() => {
-      this.connectToWhatsApp(false).catch((err) => {
-        this.logger.warn(`Inicialização automática do WhatsApp: ${err?.message}`);
-      });
-
-      // Restaura sessões ativas de outros computadores salvos em auth_info_baileys
+      // 1. Procura se existe alguma sessão com credenciais válidas salva em auth_info_baileys
+      let savedDeviceId: string | null = null;
       try {
         const baseDir = path.join(process.cwd(), 'auth_info_baileys');
         if (fs.existsSync(baseDir)) {
-          const items = fs.readdirSync(baseDir, { withFileTypes: true });
-          for (const item of items) {
-            if (item.isDirectory() && item.name !== 'default') {
-              const credsFile = path.join(baseDir, item.name, 'creds.json');
-              if (fs.existsSync(credsFile)) {
-                this.logger.log(`🔄 Restaurando conexão do WhatsApp para o computador [${item.name}]...`);
-                this.connectToWhatsApp(false, item.name).catch(() => {});
+          // Verifica primeiro na raiz
+          if (fs.existsSync(path.join(baseDir, 'creds.json'))) {
+            savedDeviceId = 'default';
+          } else {
+            // Verifica nos subdiretórios
+            const items = fs.readdirSync(baseDir, { withFileTypes: true });
+            for (const item of items) {
+              if (item.isDirectory()) {
+                const credsFile = path.join(baseDir, item.name, 'creds.json');
+                if (fs.existsSync(credsFile)) {
+                  savedDeviceId = item.name;
+                  break;
+                }
               }
             }
           }
         }
       } catch (err: any) {
-        this.logger.warn(`Erro ao restaurar sessões adicionais: ${err?.message}`);
+        this.logger.warn(`Erro ao verificar sessões salvas: ${err?.message}`);
       }
-    }, 1200);
+
+      if (savedDeviceId) {
+        this.logger.log(`🔄 Restaurando conexão salva do WhatsApp [${savedDeviceId}]...`);
+        this.connectToWhatsApp(false, savedDeviceId).catch((err) => {
+          this.logger.warn(`Erro ao restaurar conexão do WhatsApp: ${err?.message}`);
+        });
+      } else {
+        this.logger.log('📱 Nenhuma sessão salva encontrada. Inicializando motor padrão para leitura de QR Code...');
+        this.connectToWhatsApp(false, 'default').catch((err) => {
+          this.logger.warn(`Inicialização do WhatsApp: ${err?.message}`);
+        });
+      }
+    }, 1000);
   }
 
   clearAuthFolder(rawDeviceId: string = 'default') {

@@ -740,19 +740,41 @@ export default function WhatsAppBotPage() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-device-id': deviceId || getOrCreateDeviceId() },
             body: JSON.stringify({ forceNewSession }),
-            signal: AbortSignal.timeout(2000),
+            signal: AbortSignal.timeout(3000),
           }).catch(() => {})
         : Promise.resolve();
 
-      await Promise.race([Promise.all([p1, p2]), new Promise(r => setTimeout(r, 1200))]);
-      
+      await Promise.race([Promise.all([p1, p2]), new Promise(r => setTimeout(r, 1000))]);
       toast.success('Solicitação enviada! Gerando novo QR Code...');
-      setTimeout(() => checkBotStatus({ manual: false }), 1500);
-      setTimeout(() => checkBotStatus({ manual: false }), 3500);
-      setTimeout(() => checkBotStatus({ manual: false }), 6000);
+
+      // Polling ativo a cada 1s até o QR Code ou status conectado chegar
+      let attempts = 0;
+      const pollTimer = setInterval(async () => {
+        attempts++;
+        try {
+          const res = await axios.get('/whatsapp/status', { timeout: 2500 });
+          const d = res.data?.data || res.data;
+          if (d?.qrCode) {
+            setBotStatus(prev => ({ ...prev, ...d, qrCode: d.qrCode, connected: false }));
+            setIsGeneratingQr(false);
+            clearInterval(pollTimer);
+            return;
+          }
+          if (d?.connected) {
+            setBotStatus(prev => ({ ...prev, ...d, connected: true, qrCode: null }));
+            setIsGeneratingQr(false);
+            clearInterval(pollTimer);
+            return;
+          }
+        } catch {}
+
+        if (attempts >= 12) {
+          setIsGeneratingQr(false);
+          clearInterval(pollTimer);
+        }
+      }, 1000);
     } catch (e) {
       toast.error('Não foi possível solicitar a reconexão.');
-    } finally {
       setIsGeneratingQr(false);
     }
   };
