@@ -30,7 +30,20 @@ import {
   ShieldCheck,
   Check,
   X,
-  Search
+  Search,
+  Database,
+  PhoneCall,
+  ExternalLink,
+  RefreshCw,
+  Flame,
+  Snowflake,
+  Clock,
+  User,
+  DollarSign,
+  MapPin,
+  CreditCard,
+  MessageCircle,
+  MessageSquareText
 } from 'lucide-react';
 import { 
   BotFlow, 
@@ -44,6 +57,13 @@ import {
   simulateFlowStep,
   compileFlowText
 } from '@/lib/bot-flow';
+import {
+  ConversationConfig,
+  ClientConversation,
+  ConversationStats,
+  CustomFaqRule,
+  DEFAULT_CONVERSATION_CONFIG,
+} from '@/lib/conversation';
 import { safeWhatsAppClient } from '../whatsapp/whatsapp-client';
 import { useLeads } from '@/hooks/use-leads';
 import toast from 'react-hot-toast';
@@ -62,7 +82,24 @@ export default function FlowsPage() {
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'editor' | 'templates' | 'faq' | 'trigger'>('editor');
+  const [activeTab, setActiveTab] = useState<'knowledge' | 'conversations' | 'faq' | 'editor' | 'templates' | 'trigger'>('knowledge');
+
+  // Estado da Configuração Manual da Empresa e Conhecimento
+  const [config, setConfig] = useState<ConversationConfig>(DEFAULT_CONVERSATION_CONFIG);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  // Estado do Banco de Dados de Conversas
+  const [conversations, setConversations] = useState<ClientConversation[]>([]);
+  const [convStats, setConvStats] = useState<ConversationStats>({
+    totalConversations: 0,
+    totalMessages: 0,
+    hotLeadsCount: 0,
+    intentsRanking: {},
+  });
+  const [convSearch, setConvSearch] = useState('');
+  const [convStatusFilter, setConvStatusFilter] = useState('all');
+  const [selectedConversation, setSelectedConversation] = useState<ClientConversation | null>(null);
+  const [loadingConversations, setLoadingConversations] = useState(false);
 
   // Filtros da aba de modelos
   const [templateSearch, setTemplateSearch] = useState('');
@@ -96,6 +133,36 @@ export default function FlowsPage() {
     });
   }, [flows, templateSearch]);
 
+  // Carrega configurações manuais da API
+  const loadConversationConfig = async () => {
+    try {
+      const res = await safeWhatsAppClient.get('/conversation-config');
+      if (res.data?.data) {
+        setConfig(res.data.data);
+      }
+    } catch {}
+  };
+
+  // Carrega banco de dados de conversas gravadas
+  const loadConversations = async () => {
+    try {
+      setLoadingConversations(true);
+      const query = new URLSearchParams();
+      if (convStatusFilter !== 'all') query.set('status', convStatusFilter);
+      if (convSearch) query.set('search', convSearch);
+      const res = await safeWhatsAppClient.get(`/conversations?${query.toString()}`);
+      if (res.data?.data) {
+        setConversations(res.data.data.items || []);
+        if (res.data.data.stats) {
+          setConvStats(res.data.data.stats);
+        }
+      }
+    } catch {
+    } finally {
+      setLoadingConversations(false);
+    }
+  };
+
   // Carrega fluxos da API com sincronização transparente
   const loadFlows = async () => {
     try {
@@ -113,7 +180,7 @@ export default function FlowsPage() {
         }
       }
     } catch {
-      // Modo resiliente local ativo (offline/Vercel)
+      // Modo resiliente local ativo
     }
   };
 
@@ -122,7 +189,57 @@ export default function FlowsPage() {
       initSimulation(selectedFlow);
     }
     loadFlows();
+    loadConversationConfig();
+    loadConversations();
   }, []);
+
+  // Recarrega conversas ao trocar de filtro ou busca
+  useEffect(() => {
+    if (activeTab === 'conversations') {
+      loadConversations();
+    }
+  }, [activeTab, convStatusFilter, convSearch]);
+
+  // Salvar configuração manual do negócio
+  const handleSaveConfig = async (newConf?: ConversationConfig) => {
+    const toSave = newConf || config;
+    try {
+      setSavingConfig(true);
+      await safeWhatsAppClient.post('/conversation-config', toSave);
+      setConfig(toSave);
+      toast.success('Configurações manuais e inteligência do robô salvas com sucesso!');
+    } catch {
+      toast.error('Erro ao salvar configurações.');
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  // Remover conversa individual do banco de dados
+  const handleDeleteConversation = async (id: string) => {
+    try {
+      await safeWhatsAppClient.delete(`/conversations/${id}`);
+      setConversations(prev => prev.filter(c => c.id !== id));
+      if (selectedConversation?.id === id) setSelectedConversation(null);
+      toast.success('Conversa removida do histórico.');
+    } catch {
+      toast.error('Erro ao remover conversa.');
+    }
+  };
+
+  // Limpar todo o banco de conversas
+  const handleClearAllConversations = async () => {
+    if (!confirm('Deseja realmente limpar todo o histórico de conversas do banco de dados?')) return;
+    try {
+      await safeWhatsAppClient.delete('/conversations');
+      setConversations([]);
+      setSelectedConversation(null);
+      setConvStats({ totalConversations: 0, totalMessages: 0, hotLeadsCount: 0, intentsRanking: {} });
+      toast.success('Banco de dados de conversas limpo com sucesso.');
+    } catch {
+      toast.error('Erro ao limpar conversas.');
+    }
+  };
 
   // Inicializa o simulador com a primeira mensagem do fluxo
   const initSimulation = (flow: BotFlow) => {
@@ -149,88 +266,114 @@ export default function FlowsPage() {
     setSimData({});
   };
 
-  // Envia mensagem no simulador de celular
-  const handleSimSend = async (messageText?: string) => {
-    const textToSend = (messageText || simInput).trim();
-    if (!textToSend || !selectedFlow) return;
-
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-    // Adiciona a fala do usuário
-    const newHistory = [...simMessages, { sender: 'user' as const, text: textToSend, time: timeStr }];
-    setSimMessages(newHistory);
-    setSimInput('');
-    setIsSimTyping(true);
-
-    // Simulação local instantânea com motor inteligente de etapas e FAQs
-    const simResult = simulateFlowStep(selectedFlow, simCurrentStepId, textToSend, simData);
-
-    setTimeout(() => {
-      setIsSimTyping(false);
-      const replyTime = new Date();
-      const replyTimeStr = `${String(replyTime.getHours()).padStart(2, '0')}:${String(replyTime.getMinutes()).padStart(2, '0')}`;
-      
-      setSimMessages(prev => [
-        ...prev,
-        {
-          sender: 'bot',
-          text: simResult.botReply,
-          time: replyTimeStr,
-        }
-      ]);
-      setSimCurrentStepId(simResult.nextStepId);
-      if (simResult.updatedData) {
-        setSimData(simResult.updatedData);
-      }
-    }, 400);
-
-    // Sincroniza em segundo plano com o backend se disponível
-    try {
-      await safeWhatsAppClient.post('/flows/simulate', {
-        flowId: selectedFlow.id,
-        currentStepId: simCurrentStepId,
-        message: textToSend,
-        collectedData: simData,
-      });
-    } catch {}
-  };
-
+  // Scroll automático do simulador
   useEffect(() => {
     if (simChatRef.current) {
       simChatRef.current.scrollTop = simChatRef.current.scrollHeight;
     }
   }, [simMessages, isSimTyping]);
 
-  // Salvar alterações no fluxo atual
+  // Enviar mensagem no simulador de WhatsApp
+  const handleSimSend = async (messageText?: string) => {
+    const textToSend = messageText || simInput;
+    if (!textToSend.trim() || !selectedFlow) return;
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const newMessages = [
+      ...simMessages,
+      {
+        sender: 'user' as const,
+        text: textToSend,
+        time: timeStr,
+      }
+    ];
+
+    setSimMessages(newMessages);
+    setSimInput('');
+    setIsSimTyping(true);
+
+    try {
+      // 1. Tenta simulação com a inteligência conversacional primeiro se for pergunta de FAQ/Preço/Endereço
+      const norm = textToSend.toLowerCase();
+      const isQuickDoubt = /preco|valor|custa|onde fica|endereco|pix|cartao|horario|quem e|o que fazem/.test(norm);
+
+      let botReply = '';
+      let nextStepId = simCurrentStepId;
+
+      if (isQuickDoubt) {
+        try {
+          const brainSim = await safeWhatsAppClient.post('/conversations/simulate', {
+            message: textToSend,
+            name: 'Cliente Teste'
+          });
+          if (brainSim.data?.data?.reply) {
+            botReply = brainSim.data.data.reply;
+          }
+        } catch {}
+      }
+
+      if (!botReply) {
+        const stepResult = simulateFlowStep(
+          selectedFlow, 
+          simCurrentStepId, 
+          textToSend, 
+          simData
+        );
+        botReply = stepResult.botReply;
+        nextStepId = stepResult.nextStepId;
+        setSimData(stepResult.updatedData);
+      }
+
+      setTimeout(() => {
+        setIsSimTyping(false);
+        const replyNow = new Date();
+        const replyTime = `${String(replyNow.getHours()).padStart(2, '0')}:${String(replyNow.getMinutes()).padStart(2, '0')}`;
+
+        setSimMessages(prev => [
+          ...prev,
+          {
+            sender: 'bot',
+            text: botReply,
+            time: replyTime,
+          }
+        ]);
+        setSimCurrentStepId(nextStepId);
+      }, 700);
+
+    } catch {
+      setIsSimTyping(false);
+    }
+  };
+
+  // Salvar alterações do fluxo
   const handleSaveFlow = async () => {
     if (!selectedFlow) return;
-    setSaving(true);
     try {
-      const updated = { ...selectedFlow, updatedAt: Date.now() };
-      const updatedList = flows.map(f => (f.id === updated.id ? updated : f));
+      setSaving(true);
+      const updatedList = flows.map((f) => (f.id === selectedFlow.id ? selectedFlow : f));
       setFlows(updatedList);
       saveStoredFlows(updatedList);
-      setSelectedFlow(updated);
 
       try {
-        await safeWhatsAppClient.post('/flows', updated);
+        await safeWhatsAppClient.post('/flows', selectedFlow);
       } catch {}
 
-      toast.success(`Fluxo "${selectedFlow.name}" salvo com sucesso!`);
-    } catch (err: any) {
-      toast.error('Erro ao salvar o fluxo de conversação.');
+      toast.success('Fluxo de conversação salvo com sucesso!');
+    } catch {
+      toast.error('Erro ao salvar o fluxo.');
     } finally {
       setSaving(false);
     }
   };
 
-  // Ativar fluxo para o robô de WhatsApp
+  // Ativar fluxo selecionado para o robô de WhatsApp
   const handleActivateFlow = async (flowId: string) => {
     try {
-      const updatedList = flows.map(f => ({
+      const updatedList = flows.map((f) => ({
         ...f,
-        isActive: f.id === flowId
+        isActive: f.id === flowId,
       }));
       setFlows(updatedList);
       saveStoredFlows(updatedList);
@@ -266,8 +409,8 @@ export default function FlowsPage() {
     const newFlow: BotFlow = {
       id: `flow-custom-${Date.now()}`,
       name: 'Novo Fluxo Personalizado',
-      segment: 'Comércio & Serviços',
-      companyName: 'Minha Empresa',
+      segment: config.segment || 'Comércio & Serviços',
+      companyName: config.businessName || 'Minha Empresa',
       description: 'Fluxo construído sob medida para atendimento e qualificação de clientes.',
       isActive: false,
       isTemplate: false,
@@ -319,43 +462,42 @@ export default function FlowsPage() {
       ],
     };
 
-    setFlows([newFlow, ...flows]);
+    setFlows(prev => [newFlow, ...prev]);
     setSelectedFlow(newFlow);
     setEditingStepIndex(0);
     initSimulation(newFlow);
-    toast.success('Novo fluxo criado! Personalize as etapas e salve.');
+    setActiveTab('editor');
+    toast.success('Novo fluxo criado!');
   };
 
-  // Disparar fluxo para lista de leads
+  // Disparo para Leads
   const handleTriggerFlow = async () => {
-    if (!selectedFlow) return;
-    if (selectedLeadIds.length === 0) {
-      toast.error('Selecione ao menos um cliente para acionar o fluxo.');
-      return;
-    }
-
-    const leadsToDispatch = leads
-      .filter((l: any) => selectedLeadIds.includes(l.id))
+    if (!selectedFlow || selectedLeadIds.length === 0) return;
+    const leadsToTrigger = leads
+      .filter((l: any) => selectedLeadIds.includes(l.id) && l.phone)
       .map((l: any) => ({
         id: l.id,
         name: l.name,
         phone: l.phone,
-        category: l.category || l.subcategory || selectedFlow.segment,
+        category: l.category || l.subcategory,
       }));
 
-    setIsTriggering(true);
+    if (leadsToTrigger.length === 0) {
+      toast.error('Nenhum lead com telefone válido selecionado.');
+      return;
+    }
+
     try {
-      const res = await safeWhatsAppClient.post('/flows/trigger', {
+      setIsTriggering(true);
+      await safeWhatsAppClient.post('/flows/trigger', {
         flowId: selectedFlow.id,
-        leads: leadsToDispatch,
+        leads: leadsToTrigger,
       });
 
-      if (res.data?.success) {
-        toast.success(`Disparo do fluxo "${selectedFlow.name}" iniciado para ${leadsToDispatch.length} clientes!`);
-        setSelectedLeadIds([]);
-      }
+      toast.success(`Disparo do fluxo "${selectedFlow.name}" iniciado para ${leadsToTrigger.length} clientes!`);
+      setSelectedLeadIds([]);
     } catch (err: any) {
-      toast.error('Erro ao iniciar disparo do fluxo.');
+      toast.error(err?.message || 'Falha ao acionar clientes.');
     } finally {
       setIsTriggering(false);
     }
@@ -364,25 +506,78 @@ export default function FlowsPage() {
   const currentStep: BotStep | undefined = selectedFlow?.steps[editingStepIndex];
 
   return (
-    <div className="space-y-6">
-      {/* Cabeçalho */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-sm">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      
+      {/* 🛡️ Banner de Blindagem contra Grupos de WhatsApp */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-blue-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-emerald-600 text-white shadow-sm shrink-0">
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                Proteção de Grupos de WhatsApp: 100% Blindado
+              </span>
+              <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] px-2 py-0.5">
+                Ativo
+              </Badge>
+            </div>
+            <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-0.5">
+              O robô <strong>nunca responde</strong>, lê, interage ou dispara em grupos (<code className="text-emerald-700 dark:text-emerald-400">@g.us</code>), canais (<code className="text-emerald-700 dark:text-emerald-400">@newsletter</code>), transmissões ou status. Somente atendimentos individuais de pessoas reais.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-xs">
+            💬 Banco de Conversas Ativo
+          </Badge>
+          <Badge variant="outline" className="border-blue-500/40 text-blue-700 dark:text-blue-300 text-xs">
+            ⚙️ Configuração Manual Pronta
+          </Badge>
+        </div>
+      </div>
+
+      {/* Cabeçalho Principal */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
             <div className="p-2.5 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl">
               <GitBranch className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Fluxos de Conversação & Chatbot</h1>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Fluxos de Conversa & Inteligência Comercial</h1>
               <p className="text-sm text-slate-500 dark:text-zinc-400">
-                Configure todo o roteiro de perguntas, opções e respostas para conversar e acionar clientes automaticamente.
+                Atendimento humanizado para pessoas, banco de conversas persistente e configurações manuais da sua empresa.
               </p>
             </div>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {selectedFlow && (
+          {activeTab === 'knowledge' && (
+            <Button
+              size="sm"
+              onClick={() => handleSaveConfig()}
+              disabled={savingConfig}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
+            >
+              <Save className="w-4 h-4 mr-1.5" /> {savingConfig ? 'Salvando...' : 'Salvar Dados da Empresa'}
+            </Button>
+          )}
+
+          {activeTab === 'faq' && (
+            <Button
+              size="sm"
+              onClick={() => handleSaveConfig()}
+              disabled={savingConfig}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
+            >
+              <Save className="w-4 h-4 mr-1.5" /> {savingConfig ? 'Salvando...' : 'Salvar Base de Perguntas'}
+            </Button>
+          )}
+
+          {activeTab === 'editor' && selectedFlow && (
             <>
               {selectedFlow.id === activeFlowId ? (
                 <Badge className="bg-emerald-500 text-white font-semibold px-3 py-1.5 flex items-center gap-1.5 shadow-sm">
@@ -398,6 +593,15 @@ export default function FlowsPage() {
                   <Play className="w-4 h-4 mr-1.5" /> Ativar para WhatsApp
                 </Button>
               )}
+
+              <Button
+                size="sm"
+                onClick={handleSaveFlow}
+                disabled={saving}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
+              >
+                <Save className="w-4 h-4 mr-1.5" /> {saving ? 'Salvando...' : 'Salvar Alterações'}
+              </Button>
             </>
           )}
 
@@ -407,58 +611,74 @@ export default function FlowsPage() {
             onClick={handleCreateNewFlow}
             className="border-slate-300 dark:border-zinc-700"
           >
-            <Plus className="w-4 h-4 mr-1.5" /> Novo Fluxo
-          </Button>
-
-          <Button
-            size="sm"
-            onClick={handleSaveFlow}
-            disabled={saving}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold"
-          >
-            <Save className="w-4 h-4 mr-1.5" /> {saving ? 'Salvando...' : 'Salvar Alterações'}
+            <Plus className="w-4 h-4 mr-1.5" /> Novo Roteiro
           </Button>
         </div>
       </div>
 
       {/* Navegação de Abas */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-zinc-800 pb-2">
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-zinc-800 pb-2 overflow-x-auto">
         <button
-          onClick={() => setActiveTab('editor')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-            activeTab === 'editor'
+          onClick={() => setActiveTab('knowledge')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
+            activeTab === 'knowledge'
               ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
           }`}
         >
-          <Edit3 className="w-4 h-4" /> Editor do Fluxo
+          <Building2 className="w-4 h-4 text-emerald-500" /> Configuração Manual & Empresa
         </button>
 
         <button
-          onClick={() => setActiveTab('templates')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-            activeTab === 'templates'
+          onClick={() => {
+            setActiveTab('conversations');
+            loadConversations();
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
+            activeTab === 'conversations'
               ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
           }`}
         >
-          <Building2 className="w-4 h-4" /> Modelos por Empresa ({flows.length})
+          <Database className="w-4 h-4 text-blue-500" /> Banco de Conversas ({convStats.totalConversations})
         </button>
 
         <button
           onClick={() => setActiveTab('faq')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
             activeTab === 'faq'
               ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
           }`}
         >
-          <HelpCircle className="w-4 h-4" /> Respostas Rápidas (FAQ)
+          <HelpCircle className="w-4 h-4 text-amber-500" /> FAQ & Gatilhos ({config.customFaq.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('editor')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
+            activeTab === 'editor'
+              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
+          }`}
+        >
+          <Edit3 className="w-4 h-4 text-emerald-500" /> Editor de Fluxo ({selectedFlow?.steps.length || 0} etapas)
+        </button>
+
+        <button
+          onClick={() => setActiveTab('templates')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
+            activeTab === 'templates'
+              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
+          }`}
+        >
+          <Layers className="w-4 h-4 text-purple-500" /> Modelos por Nicho ({flows.length})
         </button>
 
         <button
           onClick={() => setActiveTab('trigger')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
             activeTab === 'trigger'
               ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
               : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
@@ -468,7 +688,775 @@ export default function FlowsPage() {
         </button>
       </div>
 
-      {/* ABA: MODELOS PRONTOS POR TIPO DE EMPRESA */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* ABA 1: CONFIGURAÇÃO MANUAL & INFORMAÇÕES DA EMPRESA                  */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'knowledge' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            {/* Coluna Esquerda: Formulários da Empresa (8 colunas) */}
+            <div className="lg:col-span-8 space-y-6">
+              
+              {/* Card 1: Identificação Comercial & Responsável */}
+              <Card className="border-slate-200 dark:border-zinc-800 shadow-xs">
+                <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <Building2 className="w-4 h-4 text-emerald-500" /> Identificação do Negócio & Atendimento
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        Dados usados automaticamente nas saudações e quando as pessoas perguntam sobre sua empresa.
+                      </CardDescription>
+                    </div>
+                    <Badge variant="outline" className="text-xs font-semibold text-emerald-600 border-emerald-500/40">
+                      Configuração Manual
+                    </Badge>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="pt-4 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                        Nome da Empresa / Marca
+                      </label>
+                      <Input
+                        value={config.businessName}
+                        onChange={e => setConfig({ ...config, businessName: e.target.value })}
+                        className="mt-1 text-xs"
+                        placeholder="Ex: Minha Empresa / Radar Comercial"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">Variável: <code>{'{{nome_empresa}}'}</code></p>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                        Nome do Responsável / Atendente Humano
+                      </label>
+                      <Input
+                        value={config.ownerName}
+                        onChange={e => setConfig({ ...config, ownerName: e.target.value })}
+                        className="mt-1 text-xs"
+                        placeholder="Ex: Weverton"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">Variável: <code>{'{{responsavel}}'}</code></p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                        Segmento de Atuação
+                      </label>
+                      <Input
+                        value={config.segment}
+                        onChange={e => setConfig({ ...config, segment: e.target.value })}
+                        className="mt-1 text-xs"
+                        placeholder="Ex: Tecnologia, Imobiliária, Clínica, etc."
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                        Telefone / WhatsApp Comercial
+                      </label>
+                      <Input
+                        value={config.phoneSupport}
+                        onChange={e => setConfig({ ...config, phoneSupport: e.target.value })}
+                        className="mt-1 text-xs"
+                        placeholder="Ex: (92) 99292-0233"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      O Que Sua Empresa Faz (Diferenciais & Soluções)
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={config.description}
+                      onChange={e => setConfig({ ...config, description: e.target.value })}
+                      className="w-full mt-1 text-xs p-2.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 font-sans"
+                      placeholder="Descreva de forma clara e atrativa o que vocês oferecem..."
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">Enviado quando o cliente pergunta "o que vocês fazem?", "quais os serviços?" ou "como funciona?".</p>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Link do Site, Instagram ou Catálogo de Produtos
+                    </label>
+                    <Input
+                      value={config.websiteUrl}
+                      onChange={e => setConfig({ ...config, websiteUrl: e.target.value })}
+                      className="mt-1 text-xs"
+                      placeholder="Ex: https://meusite.com.br ou https://instagram.com/minhaloja"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">Variável: <code>{'{{link_site}}'}</code></p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Card 2: Valores, Preços & Pagamentos */}
+              <Card className="border-slate-200 dark:border-zinc-800 shadow-xs">
+                <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">
+                  <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <DollarSign className="w-4 h-4 text-emerald-500" /> Tabela de Preços, Formas de Pagamento & Pix
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Configure os valores padrão e dados para fechamento quando a pessoa perguntar preço ou quiser pagar.
+                  </CardDescription>
+                </CardHeader>
+
+                <CardContent className="pt-4 space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Informações de Preços / Valores Padrão
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={config.priceInfo}
+                      onChange={e => setConfig({ ...config, priceInfo: e.target.value })}
+                      className="w-full mt-1 text-xs p-2.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 font-sans"
+                      placeholder="Ex: Planos a partir de R$ 97/mês com teste grátis ou Serviços a partir de R$ 150..."
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">Enviado automaticamente quando o lead perguntar "quanto custa?", "qual o valor?", "tabela?" ou "precinho".</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                        Formas de Pagamento Aceitas
+                      </label>
+                      <Input
+                        value={config.paymentMethods}
+                        onChange={e => setConfig({ ...config, paymentMethods: e.target.value })}
+                        className="mt-1 text-xs"
+                        placeholder="Ex: Pix com 5% de desconto, Cartão em até 12x ou Boleto"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                        Chave Pix para Fechamento
+                      </label>
+                      <Input
+                        value={config.pixKey}
+                        onChange={e => setConfig({ ...config, pixKey: e.target.value })}
+                        className="mt-1 text-xs font-mono font-medium"
+                        placeholder="Ex: CNPJ, E-mail ou Telefone da Chave Pix"
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Card 3: Endereço & Horários de Funcionamento */}
+              <Card className="border-slate-200 dark:border-zinc-800 shadow-xs">
+                <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">
+                  <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-emerald-500" /> Endereço, Localização & Horários de Funcionamento
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Responde instantaneamente quando os clientes perguntarem "onde fica?" ou "está aberto?".
+                  </CardDescription>
+                </CardHeader>
+
+                <CardContent className="pt-4 space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Endereço / Localização / Ponto de Referência
+                    </label>
+                    <Input
+                      value={config.address}
+                      onChange={e => setConfig({ ...config, address: e.target.value })}
+                      className="mt-1 text-xs"
+                      placeholder="Ex: Av. Paulista, 1000 - Sala 42 (Próximo ao metrô / Estacionamento no local)"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Horário de Funcionamento
+                    </label>
+                    <Input
+                      value={config.workingHours}
+                      onChange={e => setConfig({ ...config, workingHours: e.target.value })}
+                      className="mt-1 text-xs"
+                      placeholder="Ex: Segunda a Sexta das 08h às 18h e Sábados até 12h"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Coluna Direita: Tom de Voz e Simulador Rápido (4 colunas) */}
+            <div className="lg:col-span-4 space-y-6">
+              
+              {/* Tom de Voz do Robô */}
+              <Card className="border-slate-200 dark:border-zinc-800 shadow-xs">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-500" /> Tom de Voz do Atendente
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Escolha como o robô se comunica com as pessoas no WhatsApp.
+                  </CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-3 pt-0">
+                  <div
+                    onClick={() => setConfig({ ...config, toneOfVoice: 'amigavel' })}
+                    className={`p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                      config.toneOfVoice === 'amigavel'
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/20 dark:bg-emerald-950/20'
+                        : 'border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-slate-900 dark:text-white">😊 Amigável & Empático (Recomendado)</span>
+                      {config.toneOfVoice === 'amigavel' && <Check className="w-4 h-4 text-emerald-500" />}
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                      Caloroso, com saudações amigáveis, emojis leves e perguntas atenciosas.
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => setConfig({ ...config, toneOfVoice: 'consultivo' })}
+                    className={`p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                      config.toneOfVoice === 'consultivo'
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/20 dark:bg-emerald-950/20'
+                        : 'border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-slate-900 dark:text-white">👔 Consultivo & Especialista</span>
+                      {config.toneOfVoice === 'consultivo' && <Check className="w-4 h-4 text-emerald-500" />}
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                      Focado em autoridade, solução de dores, clareza técnica e segurança.
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => setConfig({ ...config, toneOfVoice: 'direto' })}
+                    className={`p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                      config.toneOfVoice === 'direto'
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/20 dark:bg-emerald-950/20'
+                        : 'border-slate-200 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-slate-900 dark:text-white">⚡ Direto & Rápido</span>
+                      {config.toneOfVoice === 'direto' && <Check className="w-4 h-4 text-emerald-500" />}
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                      Objetivo e sucinto. Responde rápido e direciona logo para o fechamento.
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 dark:border-zinc-800 space-y-2">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Nome do Assistente Virtual
+                    </label>
+                    <Input
+                      value={config.botName}
+                      onChange={e => setConfig({ ...config, botName: e.target.value })}
+                      className="h-8 text-xs"
+                      placeholder="Ex: Assistente Virtual Weverton"
+                    />
+                  </div>
+
+                  <Button
+                    onClick={() => handleSaveConfig()}
+                    disabled={savingConfig}
+                    className="w-full mt-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm"
+                  >
+                    <Save className="w-4 h-4 mr-1.5" /> {savingConfig ? 'Gravando...' : 'Salvar Todas as Configurações'}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Dicas de Humanização */}
+              <div className="p-4 rounded-2xl border border-emerald-500/30 bg-emerald-50/30 dark:bg-emerald-950/20 text-xs space-y-2">
+                <span className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4" /> Dicas de Conversão
+                </span>
+                <p className="text-slate-600 dark:text-zinc-400 text-[11px] leading-relaxed">
+                  • <strong>Variáveis Automáticas:</strong> Você pode usar <code>{'{{nome_cliente}}'}</code>, <code>{'{{minha_empresa}}'}</code> e <code>{'{{responsavel}}'}</code> em qualquer texto.<br />
+                  • <strong>Spintax:</strong> Use <code>{'{Olá|Oi|Opa}'}</code> para variar as saudações dinamicamente a cada mensagem.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* ABA 2: BANCO DE DADOS DE CONVERSAS (MEMÓRIA & HISTÓRICO REAL)        */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'conversations' && (
+        <div className="space-y-6">
+          
+          {/* Métricas do Banco de Conversas */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="border-slate-200 dark:border-zinc-800 p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">Total de Conversas</p>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">{convStats.totalConversations}</h3>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="border-slate-200 dark:border-zinc-800 p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">Mensagens Trocadas</p>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">{convStats.totalMessages}</h3>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="border-slate-200 dark:border-zinc-800 p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  <Flame className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">Leads Quentes</p>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">{convStats.hotLeadsCount}</h3>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="border-slate-200 dark:border-zinc-800 p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">Grupos Ignorados</p>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">100% Blindado</h3>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* Barra de Filtros e Busca */}
+          <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-slate-200 dark:border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+            <div className="relative w-full sm:w-96">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Input
+                value={convSearch}
+                onChange={e => setConvSearch(e.target.value)}
+                placeholder="Buscar por cliente, telefone ou trecho da mensagem..."
+                className="pl-9 pr-8 h-9 text-xs"
+              />
+              {convSearch && (
+                <button
+                  onClick={() => setConvSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <select
+                value={convStatusFilter}
+                onChange={e => setConvStatusFilter(e.target.value)}
+                className="h-9 text-xs rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 font-medium"
+              >
+                <option value="all">Todos os Status</option>
+                <option value="qualificado">🔥 Qualificado / Lead Quente</option>
+                <option value="em_andamento">⚡ Em Andamento</option>
+                <option value="atendimento_humano">🤝 Atendimento Humano</option>
+                <option value="novo">🆕 Novo</option>
+                <option value="recusado">🚫 Recusado</option>
+              </select>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={loadConversations}
+                disabled={loadingConversations}
+                className="text-xs h-9"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loadingConversations ? 'animate-spin' : ''}`} />
+                Atualizar
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleClearAllConversations}
+                className="text-xs h-9 border-rose-500/30 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                Limpar
+              </Button>
+            </div>
+          </div>
+
+          {/* Lista de Conversas Registradas */}
+          {conversations.length === 0 ? (
+            <div className="text-center py-16 bg-white dark:bg-zinc-900 rounded-2xl border border-dashed border-slate-300 dark:border-zinc-800">
+              <Database className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+              <p className="text-sm font-bold text-slate-700 dark:text-zinc-300">Nenhuma conversa registrada no banco</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1 max-w-md mx-auto">
+                Assim que clientes entrarem em contato no WhatsApp, as mensagens e as dúvidas detectadas ficarão salvas aqui automaticamente.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {conversations.map(conv => (
+                <Card
+                  key={conv.id}
+                  onClick={() => setSelectedConversation(conv)}
+                  className="cursor-pointer hover:shadow-md transition-all border-slate-200 dark:border-zinc-800 hover:border-emerald-500/50"
+                >
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <CardTitle className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <User className="w-3.5 h-3.5 text-slate-400" />
+                          {conv.name || `WhatsApp ${conv.phone}`}
+                        </CardTitle>
+                        <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono mt-0.5">
+                          {conv.phone}
+                        </p>
+                      </div>
+
+                      {/* Badge de Temperatura */}
+                      {conv.leadTemperature === 'quente' ? (
+                        <Badge className="bg-amber-500 text-white text-[10px] flex items-center gap-1">
+                          <Flame className="w-3 h-3" /> Quente
+                        </Badge>
+                      ) : conv.leadTemperature === 'morno' ? (
+                        <Badge variant="outline" className="border-amber-500/40 text-amber-600 text-[10px]">
+                          ⚡ Morno
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-slate-500 text-[10px]">
+                          ❄️ Frio
+                        </Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+
+                  <CardContent className="pt-0 space-y-2 text-xs">
+                    {/* Trecho da Última Mensagem */}
+                    <div className="p-2 rounded-lg bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 text-[11px] text-slate-700 dark:text-zinc-300 line-clamp-2">
+                      <span className="font-semibold text-slate-500">
+                        {conv.lastMessageSender === 'client' ? 'Cliente: ' : conv.lastMessageSender === 'bot' ? 'Robô: ' : 'Weverton: '}
+                      </span>
+                      "{conv.lastMessageSnippet}"
+                    </div>
+
+                    {/* Dúvidas / Intenções Detectadas */}
+                    {conv.detectedIntents && conv.detectedIntents.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {conv.detectedIntents.map(intent => (
+                          <Badge key={intent} variant="outline" className="text-[9px] px-1.5 py-0 bg-slate-100 dark:bg-zinc-800">
+                            {intent === 'preco' ? '💲 Preço' :
+                             intent === 'pagamento' ? '💳 Pagamento/Pix' :
+                             intent === 'localizacao' ? '📍 Endereço' :
+                             intent === 'horario' ? '⏰ Horário' :
+                             intent === 'servicos' ? '📦 Serviços' :
+                             intent === 'garantia' ? '🛡️ Garantia' :
+                             intent === 'humano' ? '👤 Atendente' : intent}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between border-t border-slate-100 dark:border-zinc-800/80 pt-2 text-[10px] text-slate-400">
+                      <span>{conv.messagesCount || (conv.messages ? conv.messages.length : 0)} mensagens</span>
+                      <span>{new Date(conv.lastInteractionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        size="sm"
+                        className="w-full text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white dark:bg-zinc-800 dark:hover:bg-zinc-700 h-8"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedConversation(conv);
+                        }}
+                      >
+                        <MessageSquareText className="w-3.5 h-3.5 mr-1" /> Ver Conversa Completa
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 p-0 text-slate-400 hover:text-rose-500 shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteConversation(conv.id);
+                        }}
+                        title="Remover conversa"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Modal / Visualizador de Conversa Completa */}
+          {selectedConversation && (
+            <div 
+              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+              onClick={() => setSelectedConversation(null)}
+            >
+              <div 
+                className="bg-white dark:bg-zinc-950 rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl border border-slate-200 dark:border-zinc-800 overflow-hidden"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Cabeçalho do Chat */}
+                <div className="p-4 bg-[#075E54] text-white flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-emerald-400/20 border border-emerald-300/40 flex items-center justify-center font-bold text-sm">
+                      {selectedConversation.name.charAt(0) || 'C'}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold">{selectedConversation.name}</h4>
+                      <p className="text-[11px] text-emerald-200">{selectedConversation.phone}</p>
+                    </div>
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setSelectedConversation(null)}
+                    className="text-white hover:bg-emerald-800/60 rounded-full w-8 h-8 p-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                {/* Balões de Mensagem Estilo WhatsApp */}
+                <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#E5DDD5] dark:bg-[#0b141a]">
+                  {selectedConversation.messages && selectedConversation.messages.length > 0 ? (
+                    selectedConversation.messages.map(msg => (
+                      <div
+                        key={msg.id}
+                        className={`flex flex-col ${
+                          msg.sender === 'client' ? 'items-start' : 'items-end'
+                        }`}
+                      >
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-xs shadow-xs ${
+                            msg.sender === 'client'
+                              ? 'bg-white dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-tl-xs'
+                              : msg.sender === 'human'
+                              ? 'bg-blue-600 text-white rounded-tr-xs'
+                              : 'bg-[#DCF8C6] dark:bg-[#005c4b] text-slate-900 dark:text-zinc-100 rounded-tr-xs'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="font-bold text-[10px] opacity-75">
+                              {msg.sender === 'client' ? selectedConversation.name : msg.sender === 'human' ? 'Weverton (Manual)' : 'Radar Bot (Robô)'}
+                            </span>
+                            {msg.intentDetected && (
+                              <span className="text-[9px] px-1 rounded bg-black/10 dark:bg-white/10 font-mono">
+                                {msg.intentDetected}
+                              </span>
+                            )}
+                          </div>
+                          <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                          <div className="text-[9px] text-right mt-1 opacity-60">
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-10 text-xs text-slate-500">
+                      Nenhuma mensagem registrada nesta conversa ainda.
+                    </div>
+                  )}
+                </div>
+
+                {/* Rodapé Informativo */}
+                <div className="p-3 bg-slate-100 dark:bg-zinc-900 border-t border-slate-200 dark:border-zinc-800 flex items-center justify-between text-xs">
+                  <span className="text-[11px] text-slate-500">
+                    Status: <strong>{selectedConversation.status}</strong> • Temperatura: <strong>{selectedConversation.leadTemperature}</strong>
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-7 border-rose-500/40 text-rose-500 hover:bg-rose-50"
+                    onClick={() => handleDeleteConversation(selectedConversation.id)}
+                  >
+                    <Trash2 className="w-3 h-3 mr-1" /> Remover do Banco
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* ABA 3: PERGUNTAS E RESPOSTAS RÁPIDAS (FAQ & GATILHOS MANUAIS)        */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'faq' && (
+        <Card className="border-slate-200 dark:border-zinc-800 shadow-xs">
+          <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <HelpCircle className="w-4 h-4 text-emerald-500" /> Base de Perguntas e Respostas Manuais (FAQ)
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Adicione ou edite regras de perguntas e respostas. Quando qualquer pessoa perguntar sobre essas dúvidas no WhatsApp, o robô responde instantaneamente.
+                </CardDescription>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const newRule: CustomFaqRule = {
+                      id: `faq-${Date.now()}`,
+                      title: 'Nova Dúvida Frequente',
+                      keywords: ['duvida', 'pergunta'],
+                      answer: '{Olá|Oi}! Temos total satisfação em te atender. Em que posso te ajudar?',
+                      action: 'continue',
+                    };
+                    setConfig({
+                      ...config,
+                      customFaq: [newRule, ...config.customFaq],
+                    });
+                  }}
+                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Nova Dúvida / Gatilho
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-4 pt-4">
+            {config.customFaq.map((faq, fIdx) => (
+              <div 
+                key={faq.id || fIdx} 
+                className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs font-bold text-slate-700 dark:text-zinc-200">
+                      Regra #{fIdx + 1}
+                    </Badge>
+                    <Input
+                      value={faq.title}
+                      onChange={e => {
+                        const updated = [...config.customFaq];
+                        updated[fIdx].title = e.target.value;
+                        setConfig({ ...config, customFaq: updated });
+                      }}
+                      className="h-7 text-xs font-bold w-64"
+                      placeholder="Título da Dúvida"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={faq.action || 'continue'}
+                      onChange={e => {
+                        const updated = [...config.customFaq];
+                        updated[fIdx].action = e.target.value as any;
+                        setConfig({ ...config, customFaq: updated });
+                      }}
+                      className="h-7 text-xs rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2"
+                    >
+                      <option value="continue">Continuar conversa</option>
+                      <option value="qualify_lead">🔥 Marcar Lead Quente</option>
+                      <option value="transfer_human">🤝 Transferir para Weverton</option>
+                    </select>
+
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-rose-500 hover:text-rose-600"
+                      onClick={() => {
+                        const updated = config.customFaq.filter((_, i) => i !== fIdx);
+                        setConfig({ ...config, customFaq: updated });
+                      }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1" /> Remover
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                    Palavras-Chave Gatilho (como as pessoas costumam perguntar no WhatsApp, separadas por vírgula)
+                  </label>
+                  <Input
+                    value={(faq.keywords || []).join(', ')}
+                    onChange={e => {
+                      const kws = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                      const updated = [...config.customFaq];
+                      updated[fIdx].keywords = kws;
+                      setConfig({ ...config, customFaq: updated });
+                    }}
+                    className="mt-1 text-xs"
+                    placeholder="Ex: preco, quanto custa, tabela, valor, desconto"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                    Resposta Imediata do Robô (com suporte a Spintax e variáveis)
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={faq.answer}
+                    onChange={e => {
+                      const updated = [...config.customFaq];
+                      updated[fIdx].answer = e.target.value;
+                      setConfig({ ...config, customFaq: updated });
+                    }}
+                    className="w-full mt-1 text-xs p-2.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 font-sans"
+                    placeholder="Digite a resposta humanizada do robô..."
+                  />
+                </div>
+              </div>
+            ))}
+
+            <div className="pt-2 flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => handleSaveConfig()}
+                disabled={savingConfig}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm"
+              >
+                <Save className="w-4 h-4 mr-1.5" /> {savingConfig ? 'Gravando...' : 'Salvar Base de Perguntas e Respostas'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* ABA 4: MODELOS PRONTOS POR TIPO DE EMPRESA                           */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'templates' && (
         <div className="space-y-4">
           {/* Barra de Busca de Modelos */}
@@ -515,338 +1503,258 @@ export default function FlowsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {filteredFlows.map(flow => (
-            <Card 
-              key={flow.id} 
-              className={`transition-all duration-200 border cursor-pointer hover:shadow-md ${
-                selectedFlow?.id === flow.id
-                  ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/10 dark:bg-emerald-950/10'
-                  : 'border-slate-200 dark:border-zinc-800'
-              }`}
-              onClick={() => handleSelectFlow(flow)}
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <Badge variant="outline" className="mb-2 text-xs font-semibold">
-                      {flow.segment}
-                    </Badge>
-                    <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      {flow.name}
-                    </CardTitle>
-                  </div>
-                  {flow.id === activeFlowId && (
-                    <Badge className="bg-emerald-500 text-white text-xs">Ativo</Badge>
-                  )}
-                </div>
-                <CardDescription className="text-xs line-clamp-2 mt-1">
-                  {flow.description}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-0 text-xs text-slate-500 dark:text-zinc-400 space-y-2">
-                <div className="flex items-center justify-between border-t border-slate-100 dark:border-zinc-800/80 pt-2">
-                  <span>🏢 Empresa: <strong>{flow.companyName}</strong></span>
-                  <span><strong>{flow.steps?.length || 0}</strong> etapas</span>
-                </div>
-                <div className="flex items-center gap-2 pt-2">
-                  <Button
-                    size="sm"
-                    variant="default"
-                    className="w-full text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white dark:bg-zinc-800 dark:hover:bg-zinc-700"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSelectFlow(flow);
-                    }}
-                  >
-                    <Edit3 className="w-3.5 h-3.5 mr-1" /> Editar & Testar
-                  </Button>
-                  {flow.id !== activeFlowId && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs border-emerald-500/40 text-emerald-600 hover:bg-emerald-50"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleActivateFlow(flow.id);
-                      }}
-                    >
-                      Ativar
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                <Card 
+                  key={flow.id} 
+                  className={`transition-all duration-200 border cursor-pointer hover:shadow-md ${
+                    selectedFlow?.id === flow.id
+                      ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/10 dark:bg-emerald-950/10'
+                      : 'border-slate-200 dark:border-zinc-800'
+                  }`}
+                  onClick={() => handleSelectFlow(flow)}
+                >
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <Badge variant="outline" className="mb-2 text-xs font-semibold">
+                          {flow.segment}
+                        </Badge>
+                        <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          {flow.name}
+                        </CardTitle>
+                      </div>
+                      {flow.id === activeFlowId && (
+                        <Badge className="bg-emerald-500 text-white text-xs">Ativo</Badge>
+                      )}
+                    </div>
+                    <CardDescription className="text-xs line-clamp-2 mt-1">
+                      {flow.description}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0 text-xs text-slate-500 dark:text-zinc-400 space-y-2">
+                    <div className="flex items-center justify-between border-t border-slate-100 dark:border-zinc-800/80 pt-2">
+                      <span>🏢 Empresa: <strong>{flow.companyName}</strong></span>
+                      <span><strong>{flow.steps?.length || 0}</strong> etapas</span>
+                    </div>
+                    <div className="flex items-center gap-2 pt-2">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="w-full text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectFlow(flow);
+                        }}
+                      >
+                        <Edit3 className="w-3.5 h-3.5 mr-1" /> Editar & Testar
+                      </Button>
+                      {flow.id !== activeFlowId && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs border-emerald-500/40 text-emerald-600 hover:bg-emerald-50"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleActivateFlow(flow.id);
+                          }}
+                        >
+                          Ativar
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       )}
-    </div>
-  )}
 
-      {/* ABA: EDITOR DO FLUXO + SIMULADOR EM TEMPO REAL */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* ABA 5: EDITOR DO FLUXO + SIMULADOR EM TEMPO REAL                     */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'editor' && selectedFlow && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
           {/* COLUNA ESQUERDA: EDITOR DE ETAPAS (7 Colunas) */}
           <div className="lg:col-span-7 space-y-6">
             
-            {/* Informações Básicas da Empresa no Fluxo */}
+            {/* Informações Básicas do Fluxo */}
             <Card className="border-slate-200 dark:border-zinc-800">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base font-bold flex items-center gap-2 text-slate-900 dark:text-white">
-                  <Settings2 className="w-4 h-4 text-emerald-500" /> Identificação do Negócio
+                  <Settings2 className="w-4 h-4 text-emerald-500" /> Identificação do Fluxo
                 </CardTitle>
                 <CardDescription className="text-xs">
                   Esses dados são usados automaticamente nas saudações com a tag <code>{'{{minha_empresa}}'}</code>.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <CardContent className="space-y-4 pt-0">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">Nome do Fluxo</label>
-                    <Input
-                      value={selectedFlow.name}
-                      onChange={e => setSelectedFlow({ ...selectedFlow, name: e.target.value })}
-                      className="mt-1 text-sm font-medium"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">Nome da Empresa / Marca</label>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Nome da Empresa no Fluxo
+                    </label>
                     <Input
                       value={selectedFlow.companyName}
                       onChange={e => setSelectedFlow({ ...selectedFlow, companyName: e.target.value })}
-                      className="mt-1 text-sm font-medium"
-                      placeholder="Ex: Clínica Saúde & Sorriso"
+                      className="mt-1 text-xs"
+                      placeholder="Ex: Minha Clínica / Minha Loja"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Segmento de Atuação
+                    </label>
+                    <Input
+                      value={selectedFlow.segment}
+                      onChange={e => setSelectedFlow({ ...selectedFlow, segment: e.target.value })}
+                      className="mt-1 text-xs"
+                      placeholder="Ex: Clínicas & Saúde"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">Segmento / Nicho</label>
-                    <Input
-                      value={selectedFlow.segment}
-                      onChange={e => setSelectedFlow({ ...selectedFlow, segment: e.target.value })}
-                      className="mt-1 text-sm font-medium"
-                      placeholder="Ex: Saúde & Odontologia"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">Resposta em caso de Recusa ("Sem interesse")</label>
-                    <Input
-                      value={selectedFlow.rejectionMessage || ''}
-                      onChange={e => setSelectedFlow({ ...selectedFlow, rejectionMessage: e.target.value })}
-                      className="mt-1 text-sm font-medium"
-                      placeholder="Agradecemos sua atenção! Caso precise no futuro, estamos à disposição."
-                    />
-                  </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                    Título do Fluxo
+                  </label>
+                  <Input
+                    value={selectedFlow.name}
+                    onChange={e => setSelectedFlow({ ...selectedFlow, name: e.target.value })}
+                    className="mt-1 text-xs"
+                  />
                 </div>
               </CardContent>
             </Card>
 
-            {/* Lista Horizontal / Seletor de Etapas */}
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Layers className="w-4 h-4 text-emerald-500" /> Etapas da Conversa ({selectedFlow.steps.length})
-              </h2>
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-xs border-dashed"
-                onClick={() => {
-                  const newStepId = `step-${Date.now()}`;
-                  const newStep: BotStep = {
-                    id: newStepId,
-                    title: `Nova Pergunta ${selectedFlow.steps.length + 1}`,
-                    type: 'question_choice',
-                    message: 'Como podemos te ajudar?',
-                    options: [
-                      { id: `opt-1`, key: '1', label: 'Opção 1', nextStepId: 'step-final' },
-                      { id: `opt-2`, key: '2', label: 'Opção 2', nextStepId: 'step-final' },
-                    ],
-                  };
-                  setSelectedFlow({
-                    ...selectedFlow,
-                    steps: [...selectedFlow.steps, newStep],
-                  });
-                  setEditingStepIndex(selectedFlow.steps.length);
-                  toast.success('Nova etapa adicionada!');
-                }}
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" /> Adicionar Etapa
-              </Button>
-            </div>
+            {/* Lista Horizontal de Etapas */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-emerald-500" /> Etapas do Roteiro ({selectedFlow.steps.length})
+                </h3>
 
-            {/* Stepper Visual */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
-              {selectedFlow.steps.map((step, idx) => (
-                <button
-                  key={step.id}
-                  onClick={() => setEditingStepIndex(idx)}
-                  className={`px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-2 border ${
-                    editingStepIndex === idx
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                      : 'bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-800 hover:border-slate-300'
-                  }`}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const newStep: BotStep = {
+                      id: `step-${Date.now()}`,
+                      title: `Etapa ${selectedFlow.steps.length + 1}`,
+                      type: 'question_choice',
+                      message: 'Qual serviço você procura?\n\n*1️⃣* - Opção A\n*2️⃣* - Opção B',
+                      options: [
+                        { id: `opt-${Date.now()}-1`, key: '1', label: 'Opção A', nextStepId: '' },
+                        { id: `opt-${Date.now()}-2`, key: '2', label: 'Opção B', nextStepId: '' },
+                      ],
+                    };
+                    const updated = [...selectedFlow.steps, newStep];
+                    setSelectedFlow({ ...selectedFlow, steps: updated });
+                    setEditingStepIndex(updated.length - 1);
+                  }}
+                  className="text-xs h-8 border-dashed"
                 >
-                  <span className="w-5 h-5 rounded-full bg-black/10 dark:bg-white/10 flex items-center justify-center text-[10px]">
-                    {idx + 1}
-                  </span>
-                  <span className="max-w-[130px] truncate">{step.title}</span>
-                </button>
-              ))}
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Adicionar Etapa
+                </Button>
+              </div>
+
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+                {selectedFlow.steps.map((step, idx) => (
+                  <button
+                    key={step.id || idx}
+                    onClick={() => setEditingStepIndex(idx)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold shrink-0 border transition-all text-left flex items-center gap-2 ${
+                      editingStepIndex === idx
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                        : 'bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-800 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
+                      editingStepIndex === idx ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-zinc-800 text-slate-600'
+                    }`}>
+                      {idx + 1}
+                    </span>
+                    <span className="truncate max-w-[120px]">{step.title}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Card Editor da Etapa Ativa */}
+            {/* Painel de Edição da Etapa Selecionada */}
             {currentStep && (
               <Card className="border-slate-200 dark:border-zinc-800 shadow-sm">
                 <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs font-semibold">
-                          Etapa {editingStepIndex + 1} de {selectedFlow.steps.length}
-                        </Badge>
-                        <Badge className="bg-slate-100 text-slate-700 dark:bg-zinc-800 dark:text-zinc-300 text-xs">
-                          {currentStep.type === 'question_choice' && 'Pergunta com Opções'}
-                          {currentStep.type === 'question_text' && 'Pergunta de Texto Livre'}
-                          {currentStep.type === 'closing' && 'Encerramento / Transferência'}
-                          {currentStep.type === 'greeting' && 'Saudação Inicial'}
-                        </Badge>
-                      </div>
-                      <CardTitle className="text-lg font-bold text-slate-900 dark:text-white mt-1">
-                        {currentStep.title}
+                      <CardTitle className="text-base font-bold flex items-center gap-2">
+                        <Edit3 className="w-4 h-4 text-emerald-500" />
+                        Editando Etapa #{editingStepIndex + 1}: {currentStep.title}
                       </CardTitle>
+                      <CardDescription className="text-xs">
+                        Configure o texto da mensagem e como o cliente deve responder.
+                      </CardDescription>
                     </div>
 
                     {selectedFlow.steps.length > 1 && (
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                        className="text-rose-500 hover:text-rose-600 h-8 text-xs"
                         onClick={() => {
                           const updated = selectedFlow.steps.filter((_, i) => i !== editingStepIndex);
                           setSelectedFlow({ ...selectedFlow, steps: updated });
                           setEditingStepIndex(Math.max(0, editingStepIndex - 1));
-                          toast.success('Etapa removida.');
                         }}
                       >
-                        <Trash2 className="w-4 h-4 mr-1" /> Excluir Etapa
+                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Excluir Etapa
                       </Button>
                     )}
                   </div>
                 </CardHeader>
 
                 <CardContent className="space-y-4 pt-4">
-                  {/* Título da Etapa */}
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">Título / Identificador Interno</label>
-                    <Input
-                      value={currentStep.title}
-                      onChange={e => {
-                        const updated = [...selectedFlow.steps];
-                        updated[editingStepIndex].title = e.target.value;
-                        setSelectedFlow({ ...selectedFlow, steps: updated });
-                      }}
-                      className="mt-1 text-sm font-medium"
-                    />
-                  </div>
-
-                  {/* Tipo de Etapa */}
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">Tipo de Interação</label>
-                    <div className="grid grid-cols-3 gap-2 mt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = [...selectedFlow.steps];
-                          updated[editingStepIndex].type = 'question_choice';
-                          if (!updated[editingStepIndex].options) {
-                            updated[editingStepIndex].options = [
-                              { id: 'opt-1', key: '1', label: 'Opção 1', nextStepId: '' },
-                            ];
-                          }
-                          setSelectedFlow({ ...selectedFlow, steps: updated });
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold text-left transition-all ${
-                          currentStep.type === 'question_choice'
-                            ? 'border-emerald-500 bg-emerald-50/20 text-emerald-700 dark:text-emerald-300'
-                            : 'border-slate-200 dark:border-zinc-800'
-                        }`}
-                      >
-                        🔢 Pergunta com Opções
-                        <p className="text-[10px] text-slate-400 font-normal mt-0.5">Cliente responde com 1, 2, 3...</p>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = [...selectedFlow.steps];
-                          updated[editingStepIndex].type = 'question_text';
-                          setSelectedFlow({ ...selectedFlow, steps: updated });
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold text-left transition-all ${
-                          currentStep.type === 'question_text'
-                            ? 'border-emerald-500 bg-emerald-50/20 text-emerald-700 dark:text-emerald-300'
-                            : 'border-slate-200 dark:border-zinc-800'
-                        }`}
-                      >
-                        📝 Pergunta de Texto Livre
-                        <p className="text-[10px] text-slate-400 font-normal mt-0.5">Cliente digita nome, cidade, etc.</p>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = [...selectedFlow.steps];
-                          updated[editingStepIndex].type = 'closing';
-                          updated[editingStepIndex].isEnd = true;
-                          updated[editingStepIndex].action = 'transfer_human';
-                          setSelectedFlow({ ...selectedFlow, steps: updated });
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold text-left transition-all ${
-                          currentStep.type === 'closing'
-                            ? 'border-emerald-500 bg-emerald-50/20 text-emerald-700 dark:text-emerald-300'
-                            : 'border-slate-200 dark:border-zinc-800'
-                        }`}
-                      >
-                        🏁 Encerramento / Atendente
-                        <p className="text-[10px] text-slate-400 font-normal mt-0.5">Transfere para humano ou finaliza</p>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Mensagem enviada pelo robô */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
                       <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                        Mensagem enviada pelo Robô no WhatsApp
+                        Título Interno da Etapa
                       </label>
-                      <div className="flex items-center gap-1.5 text-[10px]">
-                        <span className="text-slate-400">Variáveis:</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = [...selectedFlow.steps];
-                            updated[editingStepIndex].message += ' {{nome_cliente}}';
-                            setSelectedFlow({ ...selectedFlow, steps: updated });
-                          }}
-                          className="px-1.5 py-0.5 bg-slate-100 dark:bg-zinc-800 rounded text-slate-600 dark:text-zinc-300 hover:bg-slate-200"
-                        >
-                          + Nome
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = [...selectedFlow.steps];
-                            updated[editingStepIndex].message += ' {{minha_empresa}}';
-                            setSelectedFlow({ ...selectedFlow, steps: updated });
-                          }}
-                          className="px-1.5 py-0.5 bg-slate-100 dark:bg-zinc-800 rounded text-slate-600 dark:text-zinc-300 hover:bg-slate-200"
-                        >
-                          + Empresa
-                        </button>
-                      </div>
+                      <Input
+                        value={currentStep.title}
+                        onChange={e => {
+                          const updated = [...selectedFlow.steps];
+                          updated[editingStepIndex].title = e.target.value;
+                          setSelectedFlow({ ...selectedFlow, steps: updated });
+                        }}
+                        className="mt-1 text-xs"
+                        placeholder="Ex: Pergunta de Horário"
+                      />
                     </div>
 
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                        Tipo de Resposta Esperada
+                      </label>
+                      <select
+                        value={currentStep.type}
+                        onChange={e => {
+                          const updated = [...selectedFlow.steps];
+                          updated[editingStepIndex].type = e.target.value as any;
+                          setSelectedFlow({ ...selectedFlow, steps: updated });
+                        }}
+                        className="w-full mt-1 h-9 text-xs rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 font-medium"
+                      >
+                        <option value="question_choice">Múltipla Escolha (Opções 1, 2, 3...)</option>
+                        <option value="question_text">Resposta Livre (Nome, Dúvida ou Texto)</option>
+                        <option value="closing">Encerramento / Transferência Humana</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                      Mensagem do Robô no WhatsApp
+                    </label>
                     <textarea
                       rows={5}
                       value={currentStep.message}
@@ -855,47 +1763,58 @@ export default function FlowsPage() {
                         updated[editingStepIndex].message = e.target.value;
                         setSelectedFlow({ ...selectedFlow, steps: updated });
                       }}
-                      className="w-full text-sm p-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950 font-sans focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-                      placeholder="Digite a mensagem do robô..."
+                      className="w-full mt-1 text-xs p-3 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 font-sans leading-relaxed"
+                      placeholder="Digite a mensagem que o robô enviará..."
                     />
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      💡 Dica anti-bloqueio: Use Spintax com chaves como <code>{'{Olá|Oi|Tudo bem?}'}</code> para alternar saudações automaticamente a cada cliente.
-                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[10px] text-slate-400">
+                      <span>Tags disponíveis:</span>
+                      <code className="bg-slate-100 dark:bg-zinc-800 px-1 py-0.5 rounded cursor-pointer hover:bg-slate-200" onClick={() => {
+                        const updated = [...selectedFlow.steps];
+                        updated[editingStepIndex].message += ' {{nome_cliente}}';
+                        setSelectedFlow({ ...selectedFlow, steps: updated });
+                      }}>{'{{nome_cliente}}'}</code>
+                      <code className="bg-slate-100 dark:bg-zinc-800 px-1 py-0.5 rounded cursor-pointer hover:bg-slate-200" onClick={() => {
+                        const updated = [...selectedFlow.steps];
+                        updated[editingStepIndex].message += ' {{minha_empresa}}';
+                        setSelectedFlow({ ...selectedFlow, steps: updated });
+                      }}>{'{{minha_empresa}}'}</code>
+                    </div>
                   </div>
 
-                  {/* Configuração de Opções (se for question_choice) */}
+                  {/* Configuração de Opções (para question_choice) */}
                   {currentStep.type === 'question_choice' && (
                     <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-zinc-800">
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-bold text-slate-800 dark:text-zinc-200">
-                          Opções de Resposta do Cliente
+                          Opções e Encaminhamentos
                         </label>
                         <Button
                           size="sm"
-                          variant="ghost"
-                          className="text-xs h-7 text-emerald-600"
+                          variant="outline"
                           onClick={() => {
                             const updated = [...selectedFlow.steps];
-                            const opts = updated[editingStepIndex].options || [];
-                            const nextKey = String(opts.length + 1);
-                            opts.push({
+                            const currentOptions = updated[editingStepIndex].options || [];
+                            const nextKey = String(currentOptions.length + 1);
+                            currentOptions.push({
                               id: `opt-${Date.now()}`,
                               key: nextKey,
                               label: `Opção ${nextKey}`,
                               nextStepId: '',
+                              action: 'none',
                             });
-                            updated[editingStepIndex].options = opts;
+                            updated[editingStepIndex].options = currentOptions;
                             setSelectedFlow({ ...selectedFlow, steps: updated });
                           }}
+                          className="h-7 text-xs"
                         >
-                          <Plus className="w-3.5 h-3.5 mr-1" /> Adicionar Opção
+                          <Plus className="w-3 h-3 mr-1" /> Nova Opção
                         </Button>
                       </div>
 
                       <div className="space-y-2">
                         {(currentStep.options || []).map((opt, oIdx) => (
-                          <div key={opt.id || oIdx} className="flex items-center gap-2 bg-slate-50 dark:bg-zinc-800/50 p-2.5 rounded-xl border border-slate-200 dark:border-zinc-700/60">
-                            <span className="w-7 h-7 shrink-0 rounded-lg bg-emerald-500/10 text-emerald-600 font-bold flex items-center justify-center text-xs">
+                          <div key={opt.id || oIdx} className="p-2.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 flex items-center gap-2">
+                            <span className="w-7 h-7 rounded-md bg-white dark:bg-zinc-800 border flex items-center justify-center font-bold text-xs shrink-0">
                               {opt.key}
                             </span>
                             <div className="flex-1 min-w-0">
@@ -1048,87 +1967,87 @@ export default function FlowsPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-8 w-8 p-0 text-white/80 hover:text-white hover:bg-white/10"
-                    title="Reiniciar Simulação"
                     onClick={() => initSimulation(selectedFlow)}
+                    className="text-white hover:bg-emerald-800/60 rounded-full w-8 h-8 p-0"
+                    title="Reiniciar Simulação"
                   >
                     <RotateCcw className="w-4 h-4" />
                   </Button>
                 </div>
 
-                {/* Área de Mensagens do Chat */}
+                {/* Área de Conversa do WhatsApp */}
                 <div 
                   ref={simChatRef}
-                  className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#ECE5DD] dark:bg-[#0B141A] text-slate-900 dark:text-zinc-100"
-                  style={{ backgroundImage: 'radial-gradient(#00000008 1px, transparent 1px)', backgroundSize: '16px 16px' }}
+                  className="flex-1 p-3 overflow-y-auto space-y-2.5 bg-[#E5DDD5] dark:bg-[#0b141a]"
                 >
-                  <div className="text-center my-2">
-                    <span className="bg-white/80 dark:bg-zinc-800/80 text-[10px] text-slate-500 dark:text-zinc-400 px-2.5 py-1 rounded-full shadow-xs">
-                      🔒 As mensagens são protegidas com a criptografia de ponta a ponta
+                  <div className="text-center my-1">
+                    <span className="bg-white/80 dark:bg-zinc-800/80 px-2.5 py-1 rounded-full text-[10px] text-slate-500 font-medium shadow-2xs">
+                      🔒 As mensagens são protegidas de ponta a ponta
                     </span>
                   </div>
 
-                  {simMessages.map((m, idx) => (
+                  {simMessages.map((msg, idx) => (
                     <div
                       key={idx}
-                      className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}
+                      className={`flex flex-col ${
+                        msg.sender === 'user' ? 'items-end' : 'items-start'
+                      }`}
                     >
                       <div
-                        className={`max-w-[85%] p-3 rounded-2xl text-xs leading-relaxed shadow-sm relative ${
-                          m.sender === 'user'
-                            ? 'bg-[#E7FFDB] dark:bg-[#005C4B] text-slate-900 dark:text-white rounded-tr-none'
-                            : 'bg-white dark:bg-[#202C33] text-slate-900 dark:text-white rounded-tl-none'
+                        className={`max-w-[82%] rounded-2xl px-3.5 py-2 text-xs shadow-xs ${
+                          msg.sender === 'user'
+                            ? 'bg-[#DCF8C6] dark:bg-[#005c4b] text-slate-900 dark:text-zinc-100 rounded-tr-xs'
+                            : 'bg-white dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-tl-xs'
                         }`}
                       >
-                        <p className="whitespace-pre-line">{m.text}</p>
-                        <div className="text-[9px] text-slate-400 dark:text-zinc-400 text-right mt-1 flex items-center justify-end gap-1">
-                          <span>{m.time}</span>
-                          {m.sender === 'user' && <Check className="w-3 h-3 text-sky-500" />}
+                        <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                        <div className="text-[9px] text-right mt-1 text-slate-400">
+                          {msg.time}
                         </div>
                       </div>
                     </div>
                   ))}
 
                   {isSimTyping && (
-                    <div className="flex items-center gap-1.5 bg-white dark:bg-[#202C33] p-2.5 rounded-2xl rounded-tl-none w-16 shadow-xs">
-                      <div className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" />
-                      <div className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce delay-100" />
-                      <div className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce delay-200" />
+                    <div className="flex items-center gap-1.5 bg-white dark:bg-zinc-800 px-3 py-2 rounded-2xl rounded-tl-xs w-16 text-slate-400 text-xs">
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" />
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0.4s]" />
                     </div>
                   )}
                 </div>
 
-                {/* Opções Rápidas de Resposta (se a etapa atual tiver opções) */}
-                {currentStep && currentStep.options && currentStep.options.length > 0 && (
-                  <div className="px-3 py-2 bg-slate-100 dark:bg-[#111B21] border-t border-slate-200 dark:border-zinc-800 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-                    <span className="text-[10px] text-slate-400 font-bold shrink-0">Opções:</span>
+                {/* Botões de Resposta Rápida (para question_choice) */}
+                {currentStep && currentStep.type === 'question_choice' && currentStep.options && currentStep.options.length > 0 && (
+                  <div className="p-2 bg-slate-900/90 border-t border-slate-800 flex gap-1.5 overflow-x-auto">
                     {currentStep.options.map(opt => (
-                      <button
+                      <Button
                         key={opt.id}
+                        size="sm"
+                        variant="outline"
                         onClick={() => handleSimSend(opt.key)}
-                        className="px-2.5 py-1 bg-white dark:bg-[#202C33] border border-slate-300 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-lg text-[11px] font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/30 whitespace-nowrap shadow-xs transition-colors shrink-0"
+                        className="text-[11px] h-7 bg-slate-800 border-slate-700 hover:bg-emerald-600 hover:text-white shrink-0"
                       >
                         {opt.key} - {opt.label}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 )}
 
-                {/* Campo de Entrada de Mensagem */}
-                <div className="p-2.5 bg-slate-100 dark:bg-[#202C33] flex items-center gap-2 border-t border-slate-200 dark:border-zinc-800">
+                {/* Campo de Digitação */}
+                <div className="p-2.5 bg-slate-900 border-t border-slate-800 flex items-center gap-2">
                   <Input
                     value={simInput}
                     onChange={e => setSimInput(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') handleSimSend();
-                    }}
-                    placeholder="Digite uma mensagem como cliente..."
-                    className="h-9 text-xs bg-white dark:bg-[#2A3942] border-none rounded-full text-slate-900 dark:text-white"
+                    onKeyDown={e => e.key === 'Enter' && handleSimSend()}
+                    placeholder="Digite como cliente (ex: 1, quanto custa?, onde fica?)..."
+                    className="h-9 text-xs bg-slate-950 border-slate-800 text-white rounded-full px-4 focus-visible:ring-emerald-500"
                   />
                   <Button
                     size="sm"
                     onClick={() => handleSimSend()}
-                    className="h-9 w-9 p-0 rounded-full bg-[#00A884] hover:bg-[#008f6f] text-white shrink-0 shadow-sm"
+                    disabled={!simInput.trim() || isSimTyping}
+                    className="h-9 w-9 rounded-full p-0 bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
                   >
                     <Send className="w-4 h-4" />
                   </Button>
@@ -1139,98 +2058,9 @@ export default function FlowsPage() {
         </div>
       )}
 
-      {/* ABA: DÚVIDAS FREQUENTES (FAQ / RESPOSTAS DIRETAS) */}
-      {activeTab === 'faq' && selectedFlow && (
-        <Card className="border-slate-200 dark:border-zinc-800">
-          <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-base font-bold flex items-center gap-2">
-                  <HelpCircle className="w-4 h-4 text-emerald-500" /> Respostas Imediatas por Palavras-Chave (FAQ)
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Quando o cliente fizer qualquer pergunta contendo essas palavras (ex: preço, localização, horário), o robô responde instantaneamente.
-                </CardDescription>
-              </div>
-
-              <Button
-                size="sm"
-                onClick={() => {
-                  const updatedRules = selectedFlow.faqRules || [];
-                  updatedRules.push({
-                    id: `faq-${Date.now()}`,
-                    keywords: ['preco', 'valor'],
-                    reply: 'Nossos preços partem de valores especiais. Entre em contato para cotação!',
-                  });
-                  setSelectedFlow({ ...selectedFlow, faqRules: updatedRules });
-                }}
-                className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" /> Nova Regra de FAQ
-              </Button>
-            </div>
-          </CardHeader>
-
-          <CardContent className="space-y-4 pt-4">
-            {(selectedFlow.faqRules || []).map((faq, fIdx) => (
-              <div key={faq.id || fIdx} className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-800 dark:text-zinc-200">
-                    Regra #{fIdx + 1}
-                  </label>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs text-rose-500 hover:text-rose-600"
-                    onClick={() => {
-                      const updated = selectedFlow.faqRules?.filter((_, i) => i !== fIdx);
-                      setSelectedFlow({ ...selectedFlow, faqRules: updated });
-                    }}
-                  >
-                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Remover
-                  </Button>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                    Palavras-Chave Gatilho (separadas por vírgula)
-                  </label>
-                  <Input
-                    value={(faq.keywords || []).join(', ')}
-                    onChange={e => {
-                      const kws = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
-                      const updated = [...(selectedFlow.faqRules || [])];
-                      updated[fIdx].keywords = kws;
-                      setSelectedFlow({ ...selectedFlow, faqRules: updated });
-                    }}
-                    className="mt-1 text-xs"
-                    placeholder="Ex: preco, valor, quanto custa, tabela"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                    Resposta Imediata do Robô
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={faq.reply}
-                    onChange={e => {
-                      const updated = [...(selectedFlow.faqRules || [])];
-                      updated[fIdx].reply = e.target.value;
-                      setSelectedFlow({ ...selectedFlow, faqRules: updated });
-                    }}
-                    className="w-full mt-1 text-xs p-2.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 font-sans"
-                    placeholder="Digite a resposta do robô..."
-                  />
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ABA: ACIONAR CLIENTES COM O FLUXO */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* ABA 6: ACIONAR CLIENTES COM O FLUXO                                  */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'trigger' && selectedFlow && (
         <Card className="border-slate-200 dark:border-zinc-800">
           <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">

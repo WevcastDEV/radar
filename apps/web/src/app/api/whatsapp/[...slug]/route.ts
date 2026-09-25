@@ -29,7 +29,8 @@ async function handleProxy(req: NextRequest, { params }: { params: { slug: strin
     });
   }
 
-  const targetUrl = `${apiBase.replace(/\/+$/, '')}/whatsapp/${path}`;
+  const queryString = req.nextUrl?.search || '';
+  const targetUrl = `${apiBase.replace(/\/+$/, '')}/whatsapp/${path}${queryString}`;
 
   const headers: Record<string, string> = {
     'x-device-id': deviceId,

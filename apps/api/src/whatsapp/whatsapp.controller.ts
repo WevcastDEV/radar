@@ -8,6 +8,7 @@ import { WhatsappSecurityGuard } from './whatsapp-security.guard';
 import { ConsentDto, SafetyConfigDto, SuppressionDto } from './whatsapp-safety.dto';
 
 import { BotFlowService } from './flow/bot-flow.service';
+import { ConversationBrainService } from './conversation-brain.service';
 
 @Controller('whatsapp')
 export class WhatsappController {
@@ -15,6 +16,7 @@ export class WhatsappController {
     private readonly whatsappService: WhatsappService, 
     private readonly safety: WhatsappSafetyService,
     private readonly botFlowService: BotFlowService,
+    private readonly conversationBrain: ConversationBrainService,
   ) {}
 
   @Get('safety')
@@ -417,6 +419,77 @@ export class WhatsappController {
       success: true,
       data: queueRes,
       message: `Disparo do fluxo "${flow.name}" iniciado para ${leadsToDispatch.length} contatos!`,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🧠 BASE DE CONHECIMENTO MANUAL E BANCO DE DADOS DE CONVERSAS
+  // ═══════════════════════════════════════════════════════════════════
+
+  @Get('conversation-config')
+  getConversationConfig() {
+    return {
+      success: true,
+      data: this.conversationBrain.getConfig(),
+    };
+  }
+
+  @Post('conversation-config')
+  saveConversationConfig(@Body() body: any) {
+    const updated = this.conversationBrain.saveConfig(body);
+    return {
+      success: true,
+      data: updated,
+      message: 'Configurações de inteligência conversacional salvas com sucesso!',
+    };
+  }
+
+  @Get('conversations')
+  getConversations(@Req() req: any) {
+    const status = req.query?.status as string | undefined;
+    const search = req.query?.search as string | undefined;
+    const limit = req.query?.limit ? Number(req.query.limit) : 100;
+
+    const data = this.conversationBrain.getAllConversations({ status, search, limit });
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Get('conversations/:id')
+  getConversationById(@Param('id') id: string) {
+    const conv = this.conversationBrain.getConversation(id);
+    return {
+      success: !!conv,
+      data: conv,
+    };
+  }
+
+  @Delete('conversations/:id')
+  deleteConversation(@Param('id') id: string) {
+    const deleted = this.conversationBrain.deleteConversation(id);
+    return {
+      success: deleted,
+      message: deleted ? 'Conversa removida do banco com sucesso.' : 'Conversa não encontrada.',
+    };
+  }
+
+  @Delete('conversations')
+  clearAllConversations() {
+    this.conversationBrain.clearAllConversations();
+    return {
+      success: true,
+      message: 'Banco de dados de conversas limpo com sucesso.',
+    };
+  }
+
+  @Post('conversations/simulate')
+  simulateConversationalReply(@Body() body: { message: string; name?: string }) {
+    const result = this.conversationBrain.processConversationalReply('sim_user', body.message, body.name);
+    return {
+      success: true,
+      data: result,
     };
   }
 }

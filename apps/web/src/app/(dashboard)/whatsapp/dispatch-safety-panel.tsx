@@ -101,6 +101,10 @@ export function DispatchSafetyPanel() {
         </div>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => void refresh()}>Atualizar status</Button>
       </div>
+      <div className="flex items-center gap-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-xs">
+        <span className="font-bold">🛡️ Blindagem de Grupos Ativa:</span>
+        <span>Robô 100% blindado contra grupos (@g.us), canais (@newsletter) e transmissões. Nunca responde nem dispara em grupos.</span>
+      </div>
       <p className="text-sm text-muted-foreground">A conexão usa Baileys e não tem garantia contra bloqueios. Contatos proativos exigem consentimento registrado e ausência de descadastro. Respostas de atendimento exigem uma mensagem recebida nas últimas 24 horas. Os limites abaixo são internos, não limites aprovados pela Meta.</p>
       {status?.identityReviewRequired && <p role="alert" className="text-sm text-amber-500">Descadastro recebido com identificador privado: envios bloqueados até associação verificada na migração oficial.</p>}
       {error && <p role="alert" className="text-sm text-amber-500">{error}</p>}

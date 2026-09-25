@@ -119,6 +119,20 @@ export interface DeviceSession {
 }
 
 import { BotFlowService } from './flow/bot-flow.service';
+import { ConversationBrainService } from './conversation-brain.service';
+
+export function isGroupOrBroadcastJid(jid?: string): boolean {
+  if (!jid || typeof jid !== 'string') return true;
+  const clean = jid.toLowerCase().trim();
+  return (
+    clean.endsWith('@g.us') ||
+    clean.endsWith('@broadcast') ||
+    clean.endsWith('@newsletter') ||
+    clean.includes('status@broadcast') ||
+    clean.includes('broadcast') ||
+    clean.includes('@call')
+  );
+}
 
 @Injectable()
 export class WhatsappService implements OnModuleInit {
@@ -126,6 +140,7 @@ export class WhatsappService implements OnModuleInit {
   constructor(
     private readonly safety: WhatsappSafetyService,
     private readonly botFlowService: BotFlowService,
+    private readonly conversationBrain: ConversationBrainService,
   ) {}
   private sendInProgress = false;
   private sock: any;
@@ -718,7 +733,9 @@ export class WhatsappService implements OnModuleInit {
         for (const msg of event.messages || []) {
           if (msg.key?.fromMe || !msg.message) continue;
           const jid = msg.key?.remoteJid;
-          if (!jid || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
+          // BLINDAGEM ABSOLUTA: Descartar grupos (@g.us), canais (@newsletter), transmissões (@broadcast), status ou participant
+          if (!jid || isGroupOrBroadcastJid(jid) || msg.key?.participant) continue;
+          if (!/^\d+@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
           const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
           try {
             this.safety.recordInbound(jid, text, Number(msg.messageTimestamp) * 1000);
@@ -726,6 +743,9 @@ export class WhatsappService implements OnModuleInit {
         }
         for (const msg of event.messages || []) {
           if (!msg.key) continue;
+          const jid = msg.key?.remoteJid;
+          // BLINDAGEM ABSOLUTA: Descartar grupos, canais, transmissões ou participant
+          if (!jid || isGroupOrBroadcastJid(jid) || msg.key?.participant) continue;
           try { await this.handleIncomingMessage(msg, event.type, session); }
           catch { this.logger.error('Falha no processamento da entrada; nenhuma retentativa automática.'); }
         }
@@ -749,8 +769,13 @@ export class WhatsappService implements OnModuleInit {
           return;
         }
         const targetId = msg.key.remoteJid;
-        if (targetId) {
+        // Blindagem de grupos: Weverton falando em grupo nunca afeta atendimento comercial individual
+        if (targetId && !isGroupOrBroadcastJid(targetId) && !msg.key?.participant) {
           this.registerHumanIntervention(targetId);
+          const humanText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
+          if (humanText) {
+            try { this.conversationBrain?.recordHumanMessage(targetId, humanText); } catch {}
+          }
         }
         return;
       }
@@ -761,12 +786,27 @@ export class WhatsappService implements OnModuleInit {
       if (!msg.message) return;
 
       const senderId = msg.key.remoteJid;
-      // Ignorar grupos do WhatsApp (@g.us) e canais/broadcasts (@broadcast)
-      if (!senderId || senderId.endsWith('@g.us') || senderId.endsWith('@broadcast')) {
+      // BLINDAGEM ABSOLUTA: Ignorar grupos (@g.us), canais (@newsletter), transmissões (@broadcast) ou mensagens em grupo com participant
+      if (!senderId || isGroupOrBroadcastJid(senderId) || msg.key?.participant) {
         return;
       }
 
       const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
+      const pushName = msg.pushName || '';
+
+      // 💾 Gravação estruturada da mensagem do cliente no Banco de Dados de Conversas
+      try {
+        const history = this.getDispatchedHistory();
+        const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
+        const matchedRecord = history.find(h => {
+          const hp = (h.phone || '').replace(/\D/g, '');
+          return hp && (rawNumber.endsWith(hp) || hp.endsWith(rawNumber));
+        });
+        this.conversationBrain?.recordClientMessage(senderId, text, pushName, matchedRecord);
+      } catch (err: any) {
+        this.logger.warn(`Erro no registro do banco de conversas: ${err?.message}`);
+      }
+
       const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
       try {
         const timestamp = Number(msg.messageTimestamp) * 1000;
@@ -786,7 +826,6 @@ export class WhatsappService implements OnModuleInit {
       }
       const isAutoReplyActive = deviceSession ? deviceSession.isAutoReplyEnabled : this.isAutoReplyEnabled;
       if (!isAutoReplyActive || eventType !== 'notify') return;
-      const pushName = msg.pushName || '';
 
       // Registra automaticamente que o contato respondeu/interagiu para nunca mais ser re-prospectado friamente
       this.registerAttendedPhone(senderId, pushName ? `Cliente Respondeu no WhatsApp (${pushName})` : 'Cliente Respondeu no WhatsApp');
@@ -797,8 +836,6 @@ export class WhatsappService implements OnModuleInit {
         this.logger.log(`🛡️ [Auto-Reply Ignorado] Contato pessoal detectado: "${pushName || senderId}" (regra: "${ignoredCheck.matchedTerm}"). Robô não responderá.`);
         return;
       }
-
-
 
       // 2. Filtro de Intervenção Humana: Se o Weverton está conversando nesse chat recentemente
       if (this.isHumanHandled(senderId)) {
@@ -964,34 +1001,79 @@ export class WhatsappService implements OnModuleInit {
       const flowResult = this.botFlowService.processMessage(senderId, text, matchedRecord);
       if (flowResult.reply) {
         await this.sendMessage(senderId, flowResult.reply, undefined, 'service');
+        try {
+          this.conversationBrain?.recordBotReply(senderId, flowResult.reply, flowResult.stepTitle, flowResult.action);
+        } catch {}
         this.logger.log(`🌿 [FLUXO: ${activeFlow.name}] Resposta enviada para ${senderId} (Etapa: "${flowResult.stepTitle || 'Etapa'}")`);
-      }
 
-      if (flowResult.action === 'transfer_human' || flowResult.isEnd) {
-        this.registerHumanIntervention(senderId);
-        this.logger.log(`🤝 [Transferência Humana] Cliente ${senderId} encaminhado para o atendente.`);
-      }
-
-      if (flowResult.action === 'qualify_lead' || flowResult.action === 'mark_hot') {
-        const cleanDisplayPhone = this.formatPhoneForDisplay(rawNumber);
-        const existing = this.hotLeads.find(h => h.jid === senderId);
-        if (!existing) {
-          this.hotLeads.unshift({
-            id: `hot-${Date.now()}`,
-            phone: cleanDisplayPhone,
-            jid: senderId,
-            pushName: matchedRecord?.leadName || 'Cliente',
-            leadName: matchedRecord?.leadName || 'Cliente Qualificado no Fluxo',
-            category: activeFlow.segment || 'Qualificado no Fluxo',
-            text: `Interagiu no fluxo: ${flowResult.stepTitle || activeFlow.name}`,
-            templateName: activeFlow.name,
-            timestamp: Date.now(),
-            read: false,
-          });
-          this.saveHotLeadsToDisk();
+        if (flowResult.action === 'transfer_human' || flowResult.isEnd) {
+          this.registerHumanIntervention(senderId);
+          this.logger.log(`🤝 [Transferência Humana] Cliente ${senderId} encaminhado para o atendente.`);
         }
+
+        if (flowResult.action === 'qualify_lead' || flowResult.action === 'mark_hot') {
+          const cleanDisplayPhone = this.formatPhoneForDisplay(rawNumber);
+          const existing = this.hotLeads.find(h => h.jid === senderId);
+          if (!existing) {
+            this.hotLeads.unshift({
+              id: `hot-${Date.now()}`,
+              phone: cleanDisplayPhone,
+              jid: senderId,
+              pushName: matchedRecord?.leadName || 'Cliente',
+              leadName: matchedRecord?.leadName || 'Cliente Qualificado no Fluxo',
+              category: activeFlow.segment || 'Qualificado no Fluxo',
+              text: `Interagiu no fluxo: ${flowResult.stepTitle || activeFlow.name}`,
+              templateName: activeFlow.name,
+              timestamp: Date.now(),
+              read: false,
+            });
+            this.saveHotLeadsToDisk();
+          }
+        }
+        return;
       }
-      return;
+    }
+
+    // 🧠 2. Inteligência Conversacional & Base de Conhecimento Manual
+    if (this.conversationBrain) {
+      const history = this.getDispatchedHistory();
+      const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
+      const matchedRecord = history.find(h => {
+        const hp = (h.phone || '').replace(/\D/g, '');
+        return hp && (rawNumber.endsWith(hp) || hp.endsWith(rawNumber));
+      });
+      const brainResult = this.conversationBrain.processConversationalReply(senderId, text, matchedRecord?.leadName);
+      if (brainResult.reply) {
+        await this.sendMessage(senderId, brainResult.reply, undefined, 'service');
+        try {
+          this.conversationBrain.recordBotReply(senderId, brainResult.reply, brainResult.intent || 'brain', brainResult.action);
+        } catch {}
+        this.logger.log(`🧠 [Cérebro Conversacional] Resposta enviada para ${senderId} (Intenção: "${brainResult.intent}")`);
+
+        if (brainResult.action === 'transfer_human') {
+          this.registerHumanIntervention(senderId);
+        }
+        if (brainResult.action === 'qualify_lead') {
+          const cleanDisplayPhone = this.formatPhoneForDisplay(rawNumber);
+          const existing = this.hotLeads.find(h => h.jid === senderId);
+          if (!existing) {
+            this.hotLeads.unshift({
+              id: `hot-${Date.now()}`,
+              phone: cleanDisplayPhone,
+              jid: senderId,
+              pushName: matchedRecord?.leadName || 'Cliente',
+              leadName: matchedRecord?.leadName || 'Cliente Qualificado por Dúvida',
+              category: 'Interesse Comercial',
+              text: `Interagiu com dúvida: ${brainResult.intent}`,
+              templateName: 'Base de Conhecimento',
+              timestamp: Date.now(),
+              read: false,
+            });
+            this.saveHotLeadsToDisk();
+          }
+        }
+        return;
+      }
     }
 
     // 🤖 2. Fallback: Pré-Vendedor SDR Inteligente de Custo Zero (Multi-Nicho)
@@ -1366,10 +1448,13 @@ export class WhatsappService implements OnModuleInit {
     }
 
     const campaignImage = config.image;
-    const resolvedLeads = (config.leads || []).map(l => ({
-      ...l,
-      image: l.image || campaignImage || undefined,
-    }));
+    // BLINDAGEM TOTAL: Filtrar qualquer telefone de grupo ou canal
+    const resolvedLeads = (config.leads || [])
+      .filter(l => !isGroupOrBroadcastJid(l.phone))
+      .map(l => ({
+        ...l,
+        image: l.image || campaignImage || undefined,
+      }));
 
     const intervalSecs = config.intervalSeconds && config.intervalSeconds > 0 ? config.intervalSeconds : 240;
     const bSize = config.batchSize && config.batchSize > 0 ? config.batchSize : 5; // 🛡️ Anti-Ban: 5 leads por lote
@@ -1828,6 +1913,14 @@ export class WhatsappService implements OnModuleInit {
     if (!to || typeof to !== 'string' || !to.trim()) {
       return { success: false, message: 'INVALID_RECIPIENT: informe um número de telefone válido.' };
     }
+    // BLINDAGEM TOTAL: Grupos, canais e transmissões
+    if (isGroupOrBroadcastJid(to)) {
+      this.logger.warn(`🚫 [Envio Bloqueado] Tentativa de envio para grupo ou lista de transmissão bloqueada: "${to}".`);
+      return { 
+        success: false, 
+        message: 'ENVIO_BLOQUEADO: Robô 100% blindado contra envios para grupos de WhatsApp, canais ou transmissões.' 
+      };
+    }
     if (typeof text !== 'string' || !text.trim()) {
       return { success: false, message: 'INVALID_TEXT: texto da mensagem não pode ser vazio.' };
     }
@@ -1876,6 +1969,15 @@ export class WhatsappService implements OnModuleInit {
             };
           }
         }
+      }
+
+      // BLINDAGEM TOTAL: Garantir que targetJid nunca seja grupo, canal ou transmissão
+      if (isGroupOrBroadcastJid(targetJid)) {
+        this.logger.warn(`🚫 [Envio Abortado] Target JID é grupo/canal/transmissão: "${targetJid}".`);
+        return { 
+          success: false, 
+          message: 'ENVIO_BLOQUEADO: Robô 100% blindado contra envios para grupos de WhatsApp, canais ou transmissões.' 
+        };
       }
 
       try {
@@ -2430,7 +2532,7 @@ export class WhatsappService implements OnModuleInit {
   }
 
   registerHumanIntervention(targetId: string) {
-    if (!targetId || targetId.endsWith('@g.us') || targetId.endsWith('@broadcast')) return;
+    if (!targetId || isGroupOrBroadcastJid(targetId)) return;
 
     // Cancela qualquer timer de inatividade pendente para esse chat
     const session = this.userSessions.get(targetId);
