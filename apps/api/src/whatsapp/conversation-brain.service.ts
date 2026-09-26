@@ -583,6 +583,28 @@ export class ConversationBrainService {
     return removed;
   }
 
+  getClassifiedContact(jidOrPhone: string): ClassifiedContact | undefined {
+    const cleanId = this.extractCleanId(jidOrPhone);
+    return this.classifiedContacts.get(cleanId);
+  }
+
+  setBotSilenced(jidOrPhone: string, silenced: boolean): void {
+    const cleanId = this.extractCleanId(jidOrPhone);
+    const now = Date.now();
+    let contact = this.classifiedContacts.get(cleanId);
+    if (contact) {
+      contact.botStatus = silenced ? 'silenciado' : 'ativo';
+      contact.lastInteractionAt = now;
+      this.saveContactsDatabase();
+    }
+    const conv = this.conversations.get(cleanId);
+    if (conv) {
+      conv.status = silenced ? 'atendimento_humano' : 'em_andamento';
+      conv.lastInteractionAt = now;
+      this.saveConversationsToDisk();
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // ⚙️ GESTÃO DE CONFIGURAÇÃO MANUAL (EMPRESA, FAQ, TOM DE VOZ)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -947,6 +969,7 @@ export class ConversationBrainService {
       };
       this.classifiedContacts.set(cleanId, contact);
     } else {
+      contact.botStatus = 'silenciado';
       contact.lastMessageSnippet = text.slice(0, 120);
       contact.lastMessageSender = 'human';
       contact.lastInteractionAt = now;

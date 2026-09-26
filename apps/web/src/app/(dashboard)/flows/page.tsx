@@ -373,9 +373,13 @@ export default function FlowsPage() {
   const handleOpenChat = async (contactOrConv: ClassifiedContact | ClientConversation) => {
     try {
       const id = contactOrConv.id;
+      let isPaused = (contactOrConv as any).botStatus === 'silenciado';
       const res = await safeWhatsAppClient.get(`/conversations/${id}`);
       if (res.data?.success && res.data?.data) {
         setSelectedConversation(res.data.data);
+        if (res.data.data.status === 'atendimento_humano') {
+          isPaused = true;
+        }
       } else {
         setSelectedConversation({
           id: contactOrConv.id,
@@ -396,6 +400,7 @@ export default function FlowsPage() {
           contactType: (contactOrConv as any).type || 'cliente',
         });
       }
+      setIsBotPausedForChat(isPaused);
       setChatReplyText('');
     } catch {
       toast.error('Erro ao abrir conversa.');
@@ -415,7 +420,8 @@ export default function FlowsPage() {
       });
 
       if (res.data?.success) {
-        toast.success('Mensagem enviada no WhatsApp!');
+        toast.success('Mensagem enviada no WhatsApp! Robô pausado para atendimento humano.');
+        setIsBotPausedForChat(true);
         setChatReplyText('');
         const updatedRes = await safeWhatsAppClient.get(`/conversations/${selectedConversation.id}`);
         if (updatedRes.data?.success && updatedRes.data?.data) {
@@ -423,6 +429,7 @@ export default function FlowsPage() {
         } else {
           setSelectedConversation(prev => prev ? ({
             ...prev,
+            status: 'atendimento_humano',
             messagesCount: (prev.messagesCount || 0) + 1,
             lastMessageSnippet: textToSend.slice(0, 120),
             lastMessageSender: 'human',
@@ -1821,6 +1828,10 @@ export default function FlowsPage() {
                           <Badge className="bg-indigo-500 text-white text-[10px] font-bold px-2 py-0.5 flex items-center gap-1">
                             <Heart className="w-3 h-3" /> Amigo (Silenciado)
                           </Badge>
+                        ) : c.botStatus === 'silenciado' ? (
+                          <Badge className="bg-amber-600 text-white text-[10px] font-bold px-2 py-0.5 flex items-center gap-1 shadow-xs">
+                            👤 Atendimento Manual (Robô Pausado)
+                          </Badge>
                         ) : (
                           <Badge className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 flex items-center gap-1">
                             <Briefcase className="w-3 h-3" /> Cliente (Robô Ativo)
@@ -2972,12 +2983,12 @@ export default function FlowsPage() {
             {/* Sub-barra de Status & Controle do Robô */}
             <div className="px-4 py-2 bg-slate-100 dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between text-xs shrink-0">
               <div className="flex items-center gap-2">
-                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[11px] text-slate-600 dark:text-zinc-300">
+                <span className={`inline-block w-2.5 h-2.5 rounded-full ${isBotPausedForChat ? 'bg-amber-500 ring-2 ring-amber-500/20' : 'bg-emerald-500 animate-pulse'}`} />
+                <span className="text-[11px] text-slate-700 dark:text-zinc-200">
                   {isBotPausedForChat ? (
-                    <strong className="text-amber-600 dark:text-amber-400">⏸️ Robô Pausado (Intervenção Humana)</strong>
+                    <strong className="text-amber-600 dark:text-amber-400">⏸️ Atendimento Manual — Robô não responderá</strong>
                   ) : (
-                    <strong className="text-emerald-600 dark:text-emerald-400">🤖 Robô Ativo</strong>
+                    <strong className="text-emerald-600 dark:text-emerald-400">🤖 Robô Ativo no Chat</strong>
                   )}
                 </span>
               </div>
@@ -2985,9 +2996,13 @@ export default function FlowsPage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleToggleBotForChat(!isBotPausedForChat)}
-                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200 underline decoration-dotted"
+                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
+                    isBotPausedForChat
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
+                      : 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20'
+                  }`}
                 >
-                  {isBotPausedForChat ? 'Reativar Robô no Fluxo' : 'Pausar Robô para este Chat'}
+                  {isBotPausedForChat ? '▶️ Reativar Robô' : '⏸️ Pausar Robô'}
                 </button>
               </div>
             </div>

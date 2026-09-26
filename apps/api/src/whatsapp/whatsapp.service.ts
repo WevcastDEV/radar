@@ -791,7 +791,7 @@ export class WhatsappService implements OnModuleInit {
       const text = this.extractBaileysText(msg).trim();
       const pushName = msg.pushName || '';
 
-      // Se a mensagem partiu do próprio Weverton / do seu aparelho WhatsApp:
+      // Se a mensagem partiu do próprio Weverton / do seu aparelho WhatsApp (celular, web, desktop ou painel):
       if (msg.key?.fromMe) {
         // Se a mensagem foi disparada pelo próprio robô (fila ou resposta automática), NÃO é intervenção manual!
         if (msg.key.id && this.botSentMessageIds.has(msg.key.id)) {
@@ -799,12 +799,12 @@ export class WhatsappService implements OnModuleInit {
         }
         const targetId = msg.key.remoteJid;
         if (targetId && !isGroupOrBroadcastJid(targetId) && !msg.key?.participant) {
-          const isTestTarget = targetId.includes('984892332') || targetId.includes('24443111923942');
           const msgTs = Number(msg.messageTimestamp) * 1000;
-          // Intervenção humana apenas para mensagens recentes (últimos 60s), não sync de histórico antigo e nunca para número de teste
-          if (!isTestTarget && Date.now() - msgTs < 60000) {
+          // Intervenção humana para qualquer mensagem recente (últimos 5 min) ou evento ao vivo (notify):
+          const isRecent = !msgTs || eventType === 'notify' || Math.abs(Date.now() - msgTs) < 300000;
+          if (isRecent) {
             this.registerHumanIntervention(targetId);
-            this.logger.log(`👤 [Intervenção Humana] Weverton enviou mensagem manual para "${targetId}". Robô aguardará em silêncio temporário.`);
+            this.logger.log(`👤 [Intervenção Humana Automática] Weverton enviou mensagem manual para "${targetId}". Robô travado em silêncio definitivo para esta conversa.`);
           }
           if (text) {
             try { this.conversationBrain?.recordHumanMessage(targetId, text); } catch {}
@@ -887,26 +887,10 @@ export class WhatsappService implements OnModuleInit {
         }
       }
 
-      // Se for número de teste, limpa qualquer trava de intervenção humana residual
-      if (isTestNumber && this.humanHandledChats.has(senderId)) {
-        this.humanHandledChats.delete(senderId);
-        this.saveHumanHandledChats();
-      }
-
-      // 🤫 Filtro de Intervenção Humana Recente
-      if (this.isHumanHandled(senderId) && !isTestNumber) {
-        const lower = text.trim().toLowerCase();
-        // Se o cliente enviar saudação, dúvida comercial ou comando: o robô reativa imediatamente!
-        const isWakeIntent = /^(oi|ola|olá|opa|e ai|e aí|bom dia|boa tarde|boa noite|menu|atendimento|iniciar|inicio|bot|teste|ajuda|info|informacao|informações|como funciona|preco|preço|valor|orcamento|orçamento|quanto custa|tem vaga|gostaria|quero saber)/i.test(lower);
-        if (isWakeIntent) {
-          this.humanHandledChats.delete(senderId);
-          this.saveHumanHandledChats();
-          this.userSessions.delete(senderId);
-          this.logger.log(`🔄 Cliente "${pushName || senderId}" enviou saudação ou dúvida comercial ("${text}"). Robô reativado para este chat.`);
-        } else {
-          this.logger.log(`🤫 [Silêncio Humano Recente] Conversa com "${pushName || senderId}" foi atendida por Weverton recentemente. Robô aguardando.`);
-          return;
-        }
+      // 🤫 Filtro de Intervenção Humana Definitivo: Se Weverton interagiu manualmente com este contato, o robô NÃO deve escrever mais!
+      if (this.isHumanHandled(senderId)) {
+        this.logger.log(`🤫 [Silêncio Humano Ativo] Conversa com "${pushName || senderId}" está sob atendimento de Weverton. Robô não responderá.`);
+        return;
       }
 
       this.processIncomingLeadReply(senderId, pushName, text);
@@ -1019,12 +1003,21 @@ export class WhatsappService implements OnModuleInit {
       return;
     }
 
+    // BLINDAGEM TOTAL: Se a conversa estiver sob controle humano, o robô NÃO deve intervir de forma alguma!
+    if (this.isHumanHandled(senderId)) {
+      this.logger.log(`🤫 [handleBotLogic] Execução ignorada para "${senderId}": intervenção humana ativa.`);
+      return;
+    }
+
     const existingSession = this.userSessions.get(senderId);
 
-    // Se a conversa já foi finalizada ou transferida para o humano, o robô reabre se cliente digitar "menu", "inicio", etc.
+    // Se a conversa foi finalizada por fluxo automático anterior (não humano), reabre apenas com comando explícito:
     if (existingSession && existingSession.step === 'FINALIZADO') {
+      if (existingSession.data?.humanHandled) {
+        return; // Nunca reativa se a finalização foi decorrente de atendimento humano
+      }
       const trimmedCmd = lower;
-      if (trimmedCmd === 'menu' || trimmedCmd === 'iniciar' || trimmedCmd === 'inicio' || trimmedCmd === 'cancelar' || trimmedCmd === 'oi' || trimmedCmd === 'ola') {
+      if (trimmedCmd === 'menu' || trimmedCmd === 'iniciar' || trimmedCmd === 'inicio') {
         this.userSessions.delete(senderId);
       }
     }
@@ -2394,21 +2387,45 @@ export class WhatsappService implements OnModuleInit {
   }
 
   isHumanHandled(senderId: string): boolean {
-    if (!senderId || senderId.includes('984892332') || senderId.includes('24443111923942')) return false;
-    if (!this.humanHandledChats.has(senderId)) return false;
-    const lastTimestamp = this.humanHandledChats.get(senderId) || 0;
-    // Silêncio humano temporário de 5 minutos para permitir que Weverton converse sem o bot atrapalhar
-    const QUIET_PERIOD_MS = 5 * 60 * 1000;
-    if (Date.now() - lastTimestamp > QUIET_PERIOD_MS) {
-      this.humanHandledChats.delete(senderId);
-      this.saveHumanHandledChats();
-      return false;
+    if (!senderId || isGroupOrBroadcastJid(senderId)) return false;
+
+    // 1. Verificação direta pelo JID no mapa de controle humano
+    if (this.humanHandledChats.has(senderId)) return true;
+
+    // 2. Verificação por dígitos e variantes (ex: com ou sem 55, com ou sem 9º dígito)
+    const cleanDigits = senderId.split('@')[0].replace(/\D/g, '');
+    if (cleanDigits) {
+      if (this.humanHandledChats.has(cleanDigits)) return true;
+
+      // Percorre os registros salvos para comparar dígitos nacionais
+      for (const [key] of this.humanHandledChats.entries()) {
+        const keyDigits = key.split('@')[0].replace(/\D/g, '');
+        if (keyDigits && (keyDigits === cleanDigits || keyDigits.endsWith(cleanDigits) || cleanDigits.endsWith(keyDigits))) {
+          return true;
+        }
+      }
     }
-    return true;
+
+    // 3. Verificação no Cérebro Conversacional (status da conversa e do contato)
+    if (this.conversationBrain) {
+      const conv = this.conversationBrain.getConversation(senderId);
+      if (conv?.status === 'atendimento_humano') return true;
+
+      const contact = this.conversationBrain.getClassifiedContact(senderId);
+      if (contact?.botStatus === 'silenciado') return true;
+    }
+
+    // 4. Verificação no estado de sessão em memória
+    const session = this.userSessions.get(senderId);
+    if (session?.data?.humanHandled) return true;
+
+    return false;
   }
 
   registerHumanIntervention(targetId: string) {
     if (!targetId || isGroupOrBroadcastJid(targetId)) return;
+
+    const now = Date.now();
 
     // Cancela qualquer timer de inatividade pendente para esse chat
     const session = this.userSessions.get(targetId);
@@ -2417,16 +2434,33 @@ export class WhatsappService implements OnModuleInit {
       delete session.timer;
     }
 
-    // Marca a sessão como finalizada para o robô
+    // Marca a sessão como finalizada para o robô sob controle humano
     this.userSessions.set(targetId, {
       step: 'FINALIZADO',
-      data: { humanHandled: true, timestamp: Date.now() },
+      data: { humanHandled: true, timestamp: now },
     });
 
-    this.humanHandledChats.set(targetId, Date.now());
+    // Salva o JID original e variantes de telefone para reconhecimento total
+    this.humanHandledChats.set(targetId, now);
+    const cleanDigits = targetId.split('@')[0].replace(/\D/g, '');
+    if (cleanDigits) {
+      this.humanHandledChats.set(cleanDigits, now);
+      const variants = this.extractNationalPhoneDigits(cleanDigits);
+      for (const v of variants) {
+        this.humanHandledChats.set(v, now);
+        this.humanHandledChats.set(`${v}@s.whatsapp.net`, now);
+      }
+    }
+
     this.saveHumanHandledChats();
     this.registerAttendedPhone(targetId, 'Intervenção Humana');
-    this.logger.log(`👤 [Intervenção Humana] Atendente humano interagiu no chat "${targetId}". Robô silenciado.`);
+
+    // Sincroniza no Cérebro de Conversas para que o contato fique permanentemente com status silenciado
+    try {
+      this.conversationBrain?.setBotSilenced(targetId, true);
+    } catch {}
+
+    this.logger.log(`👤 [Intervenção Humana Definitiva] Chat "${targetId}" assumido por Weverton. Robô desativado para esta conversa para não atrapalhar.`);
   }
 
   getHumanHandledChats(): Array<{ id: string; timestamp: number }> {
@@ -2440,11 +2474,26 @@ export class WhatsappService implements OnModuleInit {
     if (id) {
       this.humanHandledChats.delete(id);
       this.userSessions.delete(id);
+
+      const cleanDigits = id.split('@')[0].replace(/\D/g, '');
+      if (cleanDigits) {
+        this.humanHandledChats.delete(cleanDigits);
+        const variants = this.extractNationalPhoneDigits(cleanDigits);
+        for (const v of variants) {
+          this.humanHandledChats.delete(v);
+          this.humanHandledChats.delete(`${v}@s.whatsapp.net`);
+        }
+      }
+
+      try {
+        this.conversationBrain?.setBotSilenced(id, false);
+      } catch {}
     } else {
       this.humanHandledChats.clear();
       this.userSessions.clear();
     }
     this.saveHumanHandledChats();
+    this.logger.log(`🔄 Robô reativado para chat(s): ${id || 'todos'}.`);
     return { success: true };
   }
 
