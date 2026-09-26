@@ -887,28 +887,72 @@ export class ConversationBrainService {
     }
 
     this.saveConversationsToDisk();
+
+    // Sincroniza dados com o Banco de Contatos Classificados
+    const contact = this.classifiedContacts.get(cleanId);
+    if (contact) {
+      contact.lastMessageSnippet = text.slice(0, 120);
+      contact.lastMessageSender = 'bot';
+      contact.lastInteractionAt = now;
+      contact.totalMessages = (contact.totalMessages || 0) + 1;
+      this.saveContactsDatabase();
+    }
   }
 
   recordHumanMessage(jid: string, text: string): void {
     const cleanId = this.extractCleanId(jid);
     const conv = this.conversations.get(cleanId);
-    if (!conv) return;
-
     const now = Date.now();
-    conv.status = 'atendimento_humano';
-    conv.lastInteractionAt = now;
-    conv.lastMessageSnippet = text.slice(0, 120);
-    conv.lastMessageSender = 'human';
-    conv.messagesCount = (conv.messagesCount || 0) + 1;
 
-    conv.messages.push({
-      id: `human-${now}-${Math.random().toString(36).substring(2, 6)}`,
-      sender: 'human',
-      text,
-      timestamp: now,
-    });
+    if (conv) {
+      conv.status = 'atendimento_humano';
+      conv.lastInteractionAt = now;
+      conv.lastMessageSnippet = text.slice(0, 120);
+      conv.lastMessageSender = 'human';
+      conv.messagesCount = (conv.messagesCount || 0) + 1;
 
-    this.saveConversationsToDisk();
+      conv.messages.push({
+        id: `human-${now}-${Math.random().toString(36).substring(2, 6)}`,
+        sender: 'human',
+        text,
+        timestamp: now,
+      });
+
+      if (conv.messages.length > 50) {
+        conv.messages = conv.messages.slice(-50);
+      }
+
+      this.saveConversationsToDisk();
+    }
+
+    // Sincroniza dados com o Banco de Contatos Classificados
+    let contact = this.classifiedContacts.get(cleanId);
+    if (!contact) {
+      contact = {
+        id: cleanId,
+        jid,
+        name: conv?.name || `Contato ${cleanId}`,
+        phone: cleanId,
+        type: 'cliente',
+        category: 'Cliente Comercial',
+        confidence: 'alta',
+        reason: 'Atendimento manual / WhatsApp',
+        classifiedBy: 'auto_detect',
+        lastMessageSnippet: text.slice(0, 120),
+        lastMessageSender: 'human',
+        lastInteractionAt: now,
+        createdAt: now,
+        totalMessages: 1,
+        botStatus: 'silenciado',
+      };
+      this.classifiedContacts.set(cleanId, contact);
+    } else {
+      contact.lastMessageSnippet = text.slice(0, 120);
+      contact.lastMessageSender = 'human';
+      contact.lastInteractionAt = now;
+      contact.totalMessages = (contact.totalMessages || 0) + 1;
+    }
+    this.saveContactsDatabase();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

@@ -760,6 +760,7 @@ export class WhatsappService implements OnModuleInit {
               msg.message.viewOnceMessageV2?.message || 
               msg.message.documentWithCaptionMessage?.message ||
               msg.message;
+    if (!m) return '';
     return m.conversation || 
            m.extendedTextMessage?.text || 
            m.imageMessage?.caption || 
@@ -767,6 +768,13 @@ export class WhatsappService implements OnModuleInit {
            m.templateButtonReplyMessage?.selectedId ||
            m.buttonsResponseMessage?.selectedButtonId ||
            m.listResponseMessage?.singleSelectReply?.selectedRowId ||
+           (m.audioMessage ? '[Áudio / Mensagem de Voz]' : '') ||
+           (m.imageMessage ? '[Foto / Imagem]' : '') ||
+           (m.videoMessage ? '[Vídeo]' : '') ||
+           (m.stickerMessage ? '[Figurinha]' : '') ||
+           (m.documentMessage ? `[Documento: ${m.documentMessage.fileName || 'Arquivo'}]` : '') ||
+           (m.locationMessage ? '[Localização]' : '') ||
+           (m.contactMessage ? '[Contato Compartilhado]' : '') ||
            '';
   }
 

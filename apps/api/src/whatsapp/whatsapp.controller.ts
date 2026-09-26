@@ -493,6 +493,40 @@ export class WhatsappController {
     };
   }
 
+  @Post('conversations/reply')
+  async replyToConversation(
+    @Body() body: { to: string; text: string; jid?: string },
+    @Headers('x-device-id') deviceId?: string,
+  ) {
+    if (!body.to || !body.text) {
+      return { success: false, message: 'Destinatário e mensagem são obrigatórios.' };
+    }
+    const target = body.jid || body.to;
+    const result = await this.whatsappService.sendMessage(target, body.text, undefined, 'service', deviceId);
+    if (result.success) {
+      try {
+        this.conversationBrain.recordHumanMessage(target, body.text);
+        this.whatsappService.registerHumanIntervention(target);
+      } catch {}
+    }
+    return result;
+  }
+
+  @Post('conversations/toggle-bot')
+  toggleBotForContact(@Body() body: { jid: string; pause: boolean }) {
+    if (!body.jid) return { success: false, message: 'JID é obrigatório.' };
+    if (body.pause) {
+      this.whatsappService.registerHumanIntervention(body.jid);
+    } else {
+      this.whatsappService.clearHumanHandledChat(body.jid);
+    }
+    return {
+      success: true,
+      paused: body.pause,
+      message: body.pause ? 'Robô pausado para atendimento humano.' : 'Robô reativado para responder automaticamente.',
+    };
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // 👥 BANCO DE DADOS DE CONTATOS (CLIENTES vs AMIGOS / PESSOAL)
   // ═══════════════════════════════════════════════════════════════════

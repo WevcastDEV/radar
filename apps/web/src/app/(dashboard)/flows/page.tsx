@@ -50,6 +50,9 @@ import {
   Briefcase,
   Volume2,
   VolumeX,
+  PauseCircle,
+  PlayCircle,
+  Bot,
 } from 'lucide-react';
 import { 
   BotFlow, 
@@ -124,6 +127,10 @@ export default function FlowsPage() {
   const [convStatusFilter, setConvStatusFilter] = useState('all');
   const [selectedConversation, setSelectedConversation] = useState<ClientConversation | null>(null);
   const [loadingConversations, setLoadingConversations] = useState(false);
+  const [chatReplyText, setChatReplyText] = useState('');
+  const [isSendingReply, setIsSendingReply] = useState(false);
+  const [isBotPausedForChat, setIsBotPausedForChat] = useState(false);
+  const chatMessagesEndRef = useRef<HTMLDivElement>(null);
 
   // Filtros da aba de modelos
   const [templateSearch, setTemplateSearch] = useState('');
@@ -361,6 +368,152 @@ export default function FlowsPage() {
       toast.error('Erro ao limpar conversas.');
     }
   };
+
+  // Abrir o chat interativo com um contato ou conversa
+  const handleOpenChat = async (contactOrConv: ClassifiedContact | ClientConversation) => {
+    try {
+      const id = contactOrConv.id;
+      const res = await safeWhatsAppClient.get(`/conversations/${id}`);
+      if (res.data?.success && res.data?.data) {
+        setSelectedConversation(res.data.data);
+      } else {
+        setSelectedConversation({
+          id: contactOrConv.id,
+          jid: (contactOrConv as any).jid || `${contactOrConv.id}@s.whatsapp.net`,
+          name: contactOrConv.name,
+          phone: contactOrConv.phone,
+          status: 'novo',
+          interestScore: 20,
+          leadTemperature: 'frio',
+          detectedIntents: [],
+          businessContext: {},
+          lastMessageSnippet: (contactOrConv as any).lastMessageSnippet || '',
+          lastMessageSender: (contactOrConv as any).lastMessageSender || 'client',
+          lastInteractionAt: (contactOrConv as any).lastInteractionAt || Date.now(),
+          createdAt: (contactOrConv as any).createdAt || Date.now(),
+          messagesCount: (contactOrConv as any).totalMessages || 0,
+          messages: [],
+          contactType: (contactOrConv as any).type || 'cliente',
+        });
+      }
+      setChatReplyText('');
+    } catch {
+      toast.error('Erro ao abrir conversa.');
+    }
+  };
+
+  // Enviar resposta manual no WhatsApp diretamente pelo painel
+  const handleSendChatReply = async () => {
+    if (!chatReplyText.trim() || !selectedConversation) return;
+    const textToSend = chatReplyText.trim();
+    setIsSendingReply(true);
+    try {
+      const res = await safeWhatsAppClient.post('/conversations/reply', {
+        to: selectedConversation.phone || selectedConversation.id,
+        jid: selectedConversation.jid,
+        text: textToSend,
+      });
+
+      if (res.data?.success) {
+        toast.success('Mensagem enviada no WhatsApp!');
+        setChatReplyText('');
+        const updatedRes = await safeWhatsAppClient.get(`/conversations/${selectedConversation.id}`);
+        if (updatedRes.data?.success && updatedRes.data?.data) {
+          setSelectedConversation(updatedRes.data.data);
+        } else {
+          setSelectedConversation(prev => prev ? ({
+            ...prev,
+            messagesCount: (prev.messagesCount || 0) + 1,
+            lastMessageSnippet: textToSend.slice(0, 120),
+            lastMessageSender: 'human',
+            lastInteractionAt: Date.now(),
+            messages: [
+              ...(prev.messages || []),
+              {
+                id: `human-${Date.now()}`,
+                sender: 'human',
+                text: textToSend,
+                timestamp: Date.now(),
+              }
+            ]
+          }) : null);
+        }
+        loadClassifiedContacts();
+        loadConversations();
+      } else {
+        toast.error(res.data?.message || 'Falha ao enviar mensagem.');
+      }
+    } catch (e: any) {
+      toast.error('Erro ao enviar mensagem no WhatsApp.');
+    } finally {
+      setIsSendingReply(false);
+    }
+  };
+
+  // Pausar ou reativar o robô para este chat
+  const handleToggleBotForChat = async (pause: boolean) => {
+    if (!selectedConversation) return;
+    try {
+      const targetJid = selectedConversation.jid || `${selectedConversation.id}@s.whatsapp.net`;
+      const res = await safeWhatsAppClient.post('/conversations/toggle-bot', {
+        jid: targetJid,
+        pause,
+      });
+      if (res.data?.success) {
+        setIsBotPausedForChat(pause);
+        toast.success(pause ? 'Robô pausado para atendimento humano.' : 'Robô reativado para este contato!');
+        loadClassifiedContacts();
+      }
+    } catch {
+      toast.error('Erro ao alterar controle do robô.');
+    }
+  };
+
+  // Abrir no WhatsApp Web oficial
+  const openWhatsAppWeb = (phoneOrJid: string) => {
+    const raw = phoneOrJid.split('@')[0].replace(/\D/g, '');
+    const cleanPhone = raw.startsWith('55') ? raw : `55${raw}`;
+    window.open(`https://web.whatsapp.com/send?phone=${cleanPhone}`, '_blank');
+  };
+
+  // Auto-scroll para última mensagem no modal de conversa
+  useEffect(() => {
+    if (selectedConversation && chatMessagesEndRef.current) {
+      chatMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [selectedConversation?.messages]);
+
+  // Polling em tempo real quando o modal de conversa estiver aberto (a cada 3s)
+  useEffect(() => {
+    if (!selectedConversation) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await safeWhatsAppClient.get(`/conversations/${selectedConversation.id}`);
+        if (res.data?.success && res.data?.data) {
+          setSelectedConversation(prev => {
+            if (!prev) return null;
+            if (res.data.data.messages?.length !== prev.messages?.length || res.data.data.lastInteractionAt !== prev.lastInteractionAt) {
+              return res.data.data;
+            }
+            return prev;
+          });
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [selectedConversation?.id]);
+
+  // Atualização periódica em background de contatos e conversas a cada 6 segundos
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (activeTab === 'contacts') {
+        loadClassifiedContacts();
+      } else if (activeTab === 'conversations') {
+        loadConversations();
+      }
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [activeTab]);
 
   // Inicializa o simulador com a primeira mensagem do fluxo
   const initSimulation = (flow: BotFlow) => {
@@ -1418,13 +1571,13 @@ export default function FlowsPage() {
                     <div className="flex items-center gap-2 pt-1">
                       <Button
                         size="sm"
-                        className="w-full text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white dark:bg-zinc-800 dark:hover:bg-zinc-700 h-8"
+                        className="w-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white h-8"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSelectedConversation(conv);
+                          handleOpenChat(conv);
                         }}
                       >
-                        <MessageSquareText className="w-3.5 h-3.5 mr-1" /> Ver Conversa
+                        <MessageSquareText className="w-3.5 h-3.5 mr-1" /> Ver Conversa & Responder
                       </Button>
 
                       {/* Botão de Alternância Rápida Amigo vs Cliente */}
@@ -1462,99 +1615,6 @@ export default function FlowsPage() {
                   </CardContent>
                 </Card>
               ))}
-            </div>
-          )}
-
-          {/* Modal / Visualizador de Conversa Completa */}
-          {selectedConversation && (
-            <div 
-              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
-              onClick={() => setSelectedConversation(null)}
-            >
-              <div 
-                className="bg-white dark:bg-zinc-950 rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl border border-slate-200 dark:border-zinc-800 overflow-hidden"
-                onClick={e => e.stopPropagation()}
-              >
-                {/* Cabeçalho do Chat */}
-                <div className="p-4 bg-[#075E54] text-white flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-emerald-400/20 border border-emerald-300/40 flex items-center justify-center font-bold text-sm">
-                      {selectedConversation.name.charAt(0) || 'C'}
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold">{selectedConversation.name}</h4>
-                      <p className="text-[11px] text-emerald-200">{selectedConversation.phone}</p>
-                    </div>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setSelectedConversation(null)}
-                    className="text-white hover:bg-emerald-800/60 rounded-full w-8 h-8 p-0"
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-
-                {/* Balões de Mensagem Estilo WhatsApp */}
-                <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#E5DDD5] dark:bg-[#0b141a]">
-                  {selectedConversation.messages && selectedConversation.messages.length > 0 ? (
-                    selectedConversation.messages.map(msg => (
-                      <div
-                        key={msg.id}
-                        className={`flex flex-col ${
-                          msg.sender === 'client' ? 'items-start' : 'items-end'
-                        }`}
-                      >
-                        <div
-                          className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-xs shadow-xs ${
-                            msg.sender === 'client'
-                              ? 'bg-white dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-tl-xs'
-                              : msg.sender === 'human'
-                              ? 'bg-blue-600 text-white rounded-tr-xs'
-                              : 'bg-[#DCF8C6] dark:bg-[#005c4b] text-slate-900 dark:text-zinc-100 rounded-tr-xs'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className="font-bold text-[10px] opacity-75">
-                              {msg.sender === 'client' ? selectedConversation.name : msg.sender === 'human' ? 'Weverton (Manual)' : 'Radar Bot (Robô)'}
-                            </span>
-                            {msg.intentDetected && (
-                              <span className="text-[9px] px-1 rounded bg-black/10 dark:bg-white/10 font-mono">
-                                {msg.intentDetected}
-                              </span>
-                            )}
-                          </div>
-                          <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
-                          <div className="text-[9px] text-right mt-1 opacity-60">
-                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-10 text-xs text-slate-500">
-                      Nenhuma mensagem registrada nesta conversa ainda.
-                    </div>
-                  )}
-                </div>
-
-                {/* Rodapé Informativo */}
-                <div className="p-3 bg-slate-100 dark:bg-zinc-900 border-t border-slate-200 dark:border-zinc-800 flex items-center justify-between text-xs">
-                  <span className="text-[11px] text-slate-500">
-                    Status: <strong>{selectedConversation.status}</strong> • Temperatura: <strong>{selectedConversation.leadTemperature}</strong>
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-7 border-rose-500/40 text-rose-500 hover:bg-rose-50"
-                    onClick={() => handleDeleteConversation(selectedConversation.id)}
-                  >
-                    <Trash2 className="w-3 h-3 mr-1" /> Remover do Banco
-                  </Button>
-                </div>
-              </div>
             </div>
           )}
         </div>
@@ -1755,16 +1815,23 @@ export default function FlowsPage() {
                         </div>
                       </div>
 
-                      {/* Badge Principal */}
-                      {c.type === 'amigo' ? (
-                        <Badge className="bg-indigo-500 text-white text-[10px] font-bold px-2 py-0.5 flex items-center gap-1 shrink-0">
-                          <Heart className="w-3 h-3" /> Amigo (Silenciado)
-                        </Badge>
-                      ) : (
-                        <Badge className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 flex items-center gap-1 shrink-0">
-                          <Briefcase className="w-3 h-3" /> Cliente (Robô Ativo)
-                        </Badge>
-                      )}
+                      {/* Badges */}
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        {c.type === 'amigo' ? (
+                          <Badge className="bg-indigo-500 text-white text-[10px] font-bold px-2 py-0.5 flex items-center gap-1">
+                            <Heart className="w-3 h-3" /> Amigo (Silenciado)
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 flex items-center gap-1">
+                            <Briefcase className="w-3 h-3" /> Cliente (Robô Ativo)
+                          </Badge>
+                        )}
+                        {c.lastMessageSender === 'client' && (
+                          <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[9px] font-bold px-1.5 py-0.5 animate-pulse">
+                            ⚡ Aguardando Resposta
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </CardHeader>
 
@@ -1796,36 +1863,57 @@ export default function FlowsPage() {
                     </div>
 
                     {/* Ações com 1 clique */}
-                    <div className="flex items-center gap-2 pt-1">
-                      {c.type === 'cliente' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full text-xs font-semibold h-8 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
-                          onClick={() => handleToggleContactType(c.id, 'amigo', c.name)}
-                        >
-                          <Heart className="w-3.5 h-3.5 mr-1.5" /> Mudar para Amigo
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full text-xs font-semibold h-8 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-                          onClick={() => handleToggleContactType(c.id, 'cliente', c.name)}
-                        >
-                          <Briefcase className="w-3.5 h-3.5 mr-1.5" /> Mudar para Cliente
-                        </Button>
-                      )}
-
+                    <div className="flex flex-col gap-2 pt-1">
+                      {/* BOTÃO PRINCIPAL DE RESPOSTA */}
                       <Button
                         size="sm"
-                        variant="ghost"
-                        className="h-8 w-8 p-0 text-slate-400 hover:text-rose-500 shrink-0"
-                        onClick={() => handleDeleteContact(c.id)}
-                        title="Remover da base de contatos"
+                        className="w-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs h-9 flex items-center justify-center gap-1.5"
+                        onClick={() => handleOpenChat(c)}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <MessageSquareText className="w-4 h-4" /> Conversar & Responder
                       </Button>
+
+                      <div className="flex items-center gap-2">
+                        {c.type === 'cliente' ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full text-xs font-semibold h-8 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+                            onClick={() => handleToggleContactType(c.id, 'amigo', c.name)}
+                          >
+                            <Heart className="w-3.5 h-3.5 mr-1.5" /> Mudar para Amigo
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full text-xs font-semibold h-8 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                            onClick={() => handleToggleContactType(c.id, 'cliente', c.name)}
+                          >
+                            <Briefcase className="w-3.5 h-3.5 mr-1.5" /> Mudar para Cliente
+                          </Button>
+                        )}
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2.5 text-xs text-emerald-600 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 shrink-0"
+                          onClick={() => openWhatsAppWeb(c.phone || c.id)}
+                          title="Abrir no WhatsApp Web oficial"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-slate-400 hover:text-rose-500 shrink-0"
+                          onClick={() => handleDeleteContact(c.id)}
+                          title="Remover da base de contatos"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -2815,6 +2903,209 @@ export default function FlowsPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* 💬 MODAL DE CHAT INTERATIVO WHATSAPP (CONVERSAR & RESPONDER)       */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {selectedConversation && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4"
+          onClick={() => setSelectedConversation(null)}
+        >
+          <div 
+            className="bg-white dark:bg-zinc-950 rounded-2xl sm:rounded-3xl max-w-xl w-full h-[90vh] max-h-[820px] flex flex-col shadow-2xl border border-slate-200 dark:border-zinc-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Cabeçalho do Chat Estilo WhatsApp */}
+            <div className="p-3.5 sm:p-4 bg-[#075E54] text-white flex items-center justify-between shadow-md shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-full bg-emerald-400/20 border border-emerald-300/40 flex items-center justify-center font-bold text-sm shrink-0">
+                  {selectedConversation.name?.charAt(0)?.toUpperCase() || 'C'}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold truncate max-w-[200px] sm:max-w-[280px]">
+                      {selectedConversation.name}
+                    </h4>
+                    {selectedConversation.contactType === 'amigo' ? (
+                      <Badge className="bg-indigo-500 text-white text-[9px] font-bold px-1.5 py-0">
+                        Amigo
+                      </Badge>
+                    ) : (
+                      <Badge className="bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0">
+                        Cliente
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-emerald-200 font-mono truncate">
+                    {selectedConversation.phone || selectedConversation.id}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* Botão de abrir no WhatsApp Web oficial */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => openWhatsAppWeb(selectedConversation.phone || selectedConversation.id)}
+                  className="text-emerald-100 hover:text-white hover:bg-emerald-800/60 text-xs h-8 px-2 flex items-center gap-1"
+                  title="Abrir diretamente no WhatsApp Web"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">WhatsApp Web</span>
+                </Button>
+
+                {/* Botão de Fechar */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setSelectedConversation(null)}
+                  className="text-white hover:bg-emerald-800/60 rounded-full w-8 h-8 p-0"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Sub-barra de Status & Controle do Robô */}
+            <div className="px-4 py-2 bg-slate-100 dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between text-xs shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[11px] text-slate-600 dark:text-zinc-300">
+                  {isBotPausedForChat ? (
+                    <strong className="text-amber-600 dark:text-amber-400">⏸️ Robô Pausado (Intervenção Humana)</strong>
+                  ) : (
+                    <strong className="text-emerald-600 dark:text-emerald-400">🤖 Robô Ativo</strong>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleToggleBotForChat(!isBotPausedForChat)}
+                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200 underline decoration-dotted"
+                >
+                  {isBotPausedForChat ? 'Reativar Robô no Fluxo' : 'Pausar Robô para este Chat'}
+                </button>
+              </div>
+            </div>
+
+            {/* Balões de Mensagem Estilo WhatsApp */}
+            <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#E5DDD5] dark:bg-[#0b141a]">
+              {selectedConversation.messages && selectedConversation.messages.length > 0 ? (
+                selectedConversation.messages.map(msg => (
+                  <div
+                    key={msg.id}
+                    className={`flex flex-col ${
+                      msg.sender === 'client' ? 'items-start' : 'items-end'
+                    }`}
+                  >
+                    <div
+                      className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-xs shadow-xs ${
+                        msg.sender === 'client'
+                          ? 'bg-white dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 rounded-tl-xs'
+                          : msg.sender === 'human'
+                          ? 'bg-blue-600 text-white rounded-tr-xs shadow-sm'
+                          : 'bg-[#DCF8C6] dark:bg-[#005c4b] text-slate-900 dark:text-zinc-100 rounded-tr-xs'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="font-bold text-[10px] opacity-80 flex items-center gap-1">
+                          {msg.sender === 'client' ? (
+                            <>👤 {selectedConversation.name}</>
+                          ) : msg.sender === 'human' ? (
+                            <>✍️ Você (Weverton)</>
+                          ) : (
+                            <>🤖 Robô Automático</>
+                          )}
+                        </span>
+                        {msg.intentDetected && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 font-mono">
+                            {msg.intentDetected}
+                          </span>
+                        )}
+                      </div>
+                      <p className="whitespace-pre-wrap leading-relaxed select-text">{msg.text}</p>
+                      <div className="text-[9px] text-right mt-1 opacity-60">
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-12 text-xs text-slate-500 bg-white/60 dark:bg-zinc-900/60 rounded-xl p-4">
+                  <MessageCircle className="w-8 h-8 text-slate-400 mx-auto mb-2 opacity-50" />
+                  Nenhuma mensagem registrada nesta conversa ainda.<br/>
+                  Digite abaixo para enviar uma mensagem diretamente no WhatsApp do cliente!
+                </div>
+              )}
+              <div ref={chatMessagesEndRef} />
+            </div>
+
+            {/* Chips de Resposta Rápida */}
+            <div className="px-3 py-2 bg-slate-50 dark:bg-zinc-900 border-t border-slate-200 dark:border-zinc-800 flex items-center gap-1.5 overflow-x-auto shrink-0">
+              <span className="text-[10px] text-slate-400 font-bold shrink-0">Respostas Rápidas:</span>
+              {[
+                'Olá! Como posso te ajudar hoje?',
+                'Vou verificar para você agora mesmo!',
+                'Qual o melhor dia e horário para conversarmos?',
+                'Pode me passar mais detalhes do seu projeto?',
+              ].map((chip, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setChatReplyText(chip)}
+                  className="px-2.5 py-1 rounded-full bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-[10px] text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-700 whitespace-nowrap transition-all shrink-0"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+
+            {/* Campo de Entrada de Mensagem e Envio com 1 Clique */}
+            <div className="p-3 bg-white dark:bg-zinc-950 border-t border-slate-200 dark:border-zinc-800 shrink-0">
+              <div className="flex items-end gap-2">
+                <textarea
+                  value={chatReplyText}
+                  onChange={e => setChatReplyText(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendChatReply();
+                    }
+                  }}
+                  rows={2}
+                  placeholder={`Responder para ${selectedConversation.name}... (Enter para enviar)`}
+                  className="flex-1 resize-none rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-900 p-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <Button
+                  onClick={handleSendChatReply}
+                  disabled={isSendingReply || !chatReplyText.trim()}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-10 px-4 rounded-xl shadow-xs shrink-0 flex items-center gap-1.5"
+                >
+                  {isSendingReply ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span className="hidden sm:inline">Enviar</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1.5 flex items-center justify-between">
+                <span>💡 Pressione <strong>Enter</strong> para enviar. O robô pausará temporariamente para este cliente.</span>
+                <button
+                  onClick={() => handleDeleteConversation(selectedConversation.id)}
+                  className="text-rose-500 hover:underline"
+                >
+                  Remover do Banco
+                </button>
+              </p>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
