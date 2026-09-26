@@ -1628,12 +1628,22 @@ export default function FlowsPage() {
               </CardContent>
             </Card>
 
-            {/* Lista Horizontal de Etapas */}
+            {/* Colunas de Etapas da Conversa */}
             <div>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-emerald-500" /> Etapas do Roteiro ({selectedFlow.steps.length})
-                </h3>
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    <Layers className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      Etapas da Conversa ({selectedFlow.steps.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                      Clique em qualquer coluna para visualizar, editar ou testar o passo.
+                    </p>
+                  </div>
+                </div>
 
                 <Button
                   size="sm"
@@ -1653,31 +1663,84 @@ export default function FlowsPage() {
                     setSelectedFlow({ ...selectedFlow, steps: updated });
                     setEditingStepIndex(updated.length - 1);
                   }}
-                  className="text-xs h-8 border-dashed"
+                  className="text-xs h-8 border-dashed border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 font-semibold"
                 >
                   <Plus className="w-3.5 h-3.5 mr-1" /> Adicionar Etapa
                 </Button>
               </div>
 
-              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
-                {selectedFlow.steps.map((step, idx) => (
-                  <button
-                    key={step.id || idx}
-                    onClick={() => setEditingStepIndex(idx)}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold shrink-0 border transition-all text-left flex items-center gap-2 ${
-                      editingStepIndex === idx
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                        : 'bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-800 hover:border-slate-300'
-                    }`}
-                  >
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
-                      editingStepIndex === idx ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-zinc-800 text-slate-600'
-                    }`}>
-                      {idx + 1}
-                    </span>
-                    <span className="truncate max-w-[120px]">{step.title}</span>
-                  </button>
-                ))}
+              {/* Grid em Colunas Moderno */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 mb-4">
+                {selectedFlow.steps.map((step, idx) => {
+                  const isSelected = editingStepIndex === idx;
+                  const stepTypeLabel = 
+                    step.type === 'question_choice' ? 'Múltipla Escolha' :
+                    step.type === 'question_text' ? 'Texto Livre' : 'Encerramento';
+
+                  return (
+                    <div
+                      key={step.id || idx}
+                      onClick={() => setEditingStepIndex(idx)}
+                      className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between gap-2 shadow-xs group ${
+                        isSelected
+                          ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-950/40 shadow-sm'
+                          : 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:shadow-xs'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                            isSelected 
+                              ? 'bg-emerald-600 text-white shadow-xs' 
+                              : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300'
+                          }`}>
+                            {idx + 1}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">
+                            Passo {idx + 1}
+                          </span>
+                        </div>
+
+                        {isSelected ? (
+                          <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] px-1.5 py-0 font-semibold">
+                            Editando
+                          </Badge>
+                        ) : (
+                          <span className="text-[9px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                            Editar →
+                          </span>
+                        )}
+                      </div>
+
+                      <div>
+                        <h4 className={`text-xs font-bold leading-tight ${
+                          isSelected ? 'text-emerald-950 dark:text-emerald-100' : 'text-slate-900 dark:text-white'
+                        }`}>
+                          {step.title}
+                        </h4>
+                        <p className="text-[10px] text-slate-500 dark:text-zinc-400 line-clamp-1 mt-0.5">
+                          {step.message.replace(/[\n\r]+/g, ' ')}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 dark:border-zinc-800 text-[10px]">
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                          isSelected
+                            ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200'
+                            : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400'
+                        }`}>
+                          {stepTypeLabel}
+                        </span>
+
+                        {step.options && step.options.length > 0 && (
+                          <span className="text-[10px] text-slate-500 dark:text-zinc-400 font-medium">
+                            {step.options.length} {step.options.length === 1 ? 'opção' : 'opções'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
