@@ -41,6 +41,7 @@ export interface ClientConversation {
   status: 'novo' | 'em_andamento' | 'qualificado' | 'atendimento_humano' | 'recusado' | 'concluido';
   interestScore: number;
   leadTemperature: 'frio' | 'morno' | 'quente' | 'fechando';
+  contactType?: ContactType;
   detectedIntents: string[];
   businessContext: {
     askedPrice?: boolean;
@@ -136,3 +137,32 @@ export const DEFAULT_CONVERSATION_CONFIG: ConversationConfig = {
     },
   ],
 };
+
+export type ContactType = 'cliente' | 'amigo';
+
+export interface ClassifiedContact {
+  id: string;
+  jid: string;
+  name: string;
+  phone: string;
+  type: ContactType;
+  category: string;
+  confidence: 'alta' | 'media';
+  reason: string;
+  classifiedBy: 'manual' | 'auto_detect';
+  lastMessageSnippet: string;
+  lastMessageSender: 'client' | 'bot' | 'human';
+  lastInteractionAt: number;
+  createdAt: number;
+  totalMessages: number;
+  botStatus: 'ativo' | 'silenciado';
+  notes?: string;
+}
+
+export interface ContactsStats {
+  totalContacts: number;
+  clientsCount: number;
+  friendsCount: number;
+  botActiveCount: number;
+}
+

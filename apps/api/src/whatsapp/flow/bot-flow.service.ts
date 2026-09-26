@@ -246,6 +246,18 @@ export class BotFlowService {
 
     let session = this.sessions.get(senderId);
 
+    // Se a sessão expirou por inatividade (mais de 2 horas) ou foi finalizada, reinicia para acolher nova mensagem
+    if (session) {
+      const isExpired = session.lastInteractionAt && (Date.now() - session.lastInteractionAt > 2 * 60 * 60 * 1000);
+      const isFinished = session.currentStepId === 'FINALIZADO';
+      const isRestartCmd = norm === 'menu' || norm === 'inicio' || norm === 'iniciar' || norm === 'comecar' || norm === 'reiniciar';
+
+      if (isExpired || isFinished || isRestartCmd) {
+        this.resetSession(senderId);
+        session = undefined;
+      }
+    }
+
     // Se não há sessão iniciada, envia o primeiro passo do fluxo
     if (!session) {
       const firstStep = flow.steps[0];

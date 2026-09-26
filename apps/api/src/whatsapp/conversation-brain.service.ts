@@ -2,6 +2,27 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 
+export type ContactType = 'cliente' | 'amigo';
+
+export interface ClassifiedContact {
+  id: string; // Número limpo (ex: 559292920233)
+  jid: string;
+  name: string;
+  phone: string;
+  type: ContactType;
+  category: string; // 'Cliente Comercial' | 'Amigo / Pessoal' | 'Família' | 'Lead Quente' | 'Lead Novo'
+  confidence: 'alta' | 'media';
+  reason: string;
+  classifiedBy: 'manual' | 'auto_detect';
+  lastMessageSnippet: string;
+  lastMessageSender: 'client' | 'bot' | 'human';
+  lastInteractionAt: number;
+  createdAt: number;
+  totalMessages: number;
+  botStatus: 'ativo' | 'silenciado';
+  notes?: string;
+}
+
 export interface ClientMessage {
   id: string;
   sender: 'client' | 'bot' | 'human';
@@ -15,6 +36,7 @@ export interface ClientConversation {
   jid: string;
   name: string;
   phone: string;
+  contactType?: ContactType;
   status: 'novo' | 'em_andamento' | 'qualificado' | 'atendimento_humano' | 'recusado' | 'concluido';
   interestScore: number; // 0 a 100
   leadTemperature: 'frio' | 'morno' | 'quente' | 'fechando';
@@ -161,15 +183,24 @@ function getTimeGreeting(): string {
 export class ConversationBrainService {
   private readonly logger = new Logger(ConversationBrainService.name);
   private conversations: Map<string, ClientConversation> = new Map();
+  private classifiedContacts: Map<string, ClassifiedContact> = new Map();
   private config: ConversationConfig = { ...DEFAULT_CONFIG };
 
   constructor() {
     this.initDataDirectory();
     this.loadConfig();
     this.loadConversations();
+    this.loadContactsDatabase();
   }
 
   private getDataDir(): string {
+    const candidates = [
+      path.join(process.cwd(), 'apps', 'api', 'data'),
+      path.join(process.cwd(), 'data'),
+    ];
+    for (const dir of candidates) {
+      if (fs.existsSync(dir)) return dir;
+    }
     const dir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     return dir;
@@ -185,6 +216,371 @@ export class ConversationBrainService {
 
   private getDatabaseFilePath(): string {
     return path.join(this.getDataDir(), 'conversations_database.json');
+  }
+
+  private getContactsDatabaseFilePath(): string {
+    return path.join(this.getDataDir(), 'whatsapp_contacts_database.json');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 👥 BANCO DE DADOS DE CONTATOS (CLIENTES vs AMIGOS / PESSOAL)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private loadContactsDatabase() {
+    try {
+      const file = this.getContactsDatabaseFilePath();
+      if (fs.existsSync(file)) {
+        const raw = fs.readFileSync(file, 'utf8');
+        const list: ClassifiedContact[] = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          this.classifiedContacts.clear();
+          for (const item of list) {
+            this.classifiedContacts.set(item.id, item);
+          }
+          this.logger.log(`Banco de contatos classificados carregado: ${this.classifiedContacts.size} contatos (Clientes & Amigos).`);
+          return;
+        }
+      }
+    } catch (e: any) {
+      this.logger.error(`Erro ao carregar whatsapp_contacts_database.json: ${e?.message}`);
+    }
+
+    this.seedInitialContacts();
+  }
+
+  private seedInitialContacts() {
+    try {
+      const ignoredFile = path.join(this.getDataDir(), 'whatsapp_ignored_contacts.json');
+      if (fs.existsSync(ignoredFile)) {
+        const list: string[] = JSON.parse(fs.readFileSync(ignoredFile, 'utf8'));
+        for (const item of list) {
+          const clean = item.replace(/\D/g, '');
+          if (clean.length >= 8) {
+            this.classifiedContacts.set(clean, {
+              id: clean,
+              jid: `${clean}@s.whatsapp.net`,
+              name: item,
+              phone: clean,
+              type: 'amigo',
+              category: 'Amigo / Família',
+              confidence: 'alta',
+              reason: 'Cadastrado na lista de contatos pessoais/familiares',
+              classifiedBy: 'auto_detect',
+              lastMessageSnippet: '',
+              lastMessageSender: 'client',
+              lastInteractionAt: Date.now(),
+              createdAt: Date.now(),
+              totalMessages: 0,
+              botStatus: 'silenciado',
+              notes: 'Contato pessoal. O robô não enviará mensagens de vendas.',
+            });
+          }
+        }
+      }
+
+      for (const [id, conv] of this.conversations.entries()) {
+        if (!this.classifiedContacts.has(id)) {
+          const isFriend = conv.contactType === 'amigo' || this.isTextOrNameFriend(conv.name, conv.lastMessageSnippet);
+          this.classifiedContacts.set(id, {
+            id,
+            jid: conv.jid || `${id}@s.whatsapp.net`,
+            name: conv.name,
+            phone: conv.phone || id,
+            type: isFriend ? 'amigo' : 'cliente',
+            category: isFriend ? 'Amigo / Pessoal' : (conv.status === 'qualificado' ? 'Lead Quente' : 'Cliente Comercial'),
+            confidence: 'media',
+            reason: isFriend ? 'Detectado por padrão pessoal' : 'Interagiu no WhatsApp comercial',
+            classifiedBy: 'auto_detect',
+            lastMessageSnippet: conv.lastMessageSnippet || '',
+            lastMessageSender: conv.lastMessageSender || 'client',
+            lastInteractionAt: conv.lastInteractionAt || Date.now(),
+            createdAt: conv.createdAt || Date.now(),
+            totalMessages: conv.messagesCount || (conv.messages ? conv.messages.length : 0),
+            botStatus: isFriend ? 'silenciado' : 'ativo',
+          });
+        }
+      }
+
+      this.saveContactsDatabase();
+      this.logger.log(`Seed inicial de contatos realizado com sucesso (${this.classifiedContacts.size} contatos).`);
+    } catch (e: any) {
+      this.logger.warn(`Aviso no seed inicial de contatos: ${e?.message}`);
+    }
+  }
+
+  private saveContactsDatabase() {
+    try {
+      const list = Array.from(this.classifiedContacts.values());
+      fs.writeFileSync(this.getContactsDatabaseFilePath(), JSON.stringify(list, null, 2), 'utf8');
+    } catch (e: any) {
+      this.logger.error(`Erro ao salvar whatsapp_contacts_database.json: ${e?.message}`);
+    }
+  }
+
+  isTextOrNameFriend(name?: string, text?: string): boolean {
+    const friendKeywords = [
+      'dengosa', 'leticia', 'leticia tomais', 'namorada', 'namorado', 'esposa', 'marido',
+      'amor', 'mae', 'pai', 'irmao', 'irma', 'filho', 'filha', 'tia', 'tio', 'primo', 'prima',
+      'amigo', 'amiga', 'brother', 'mano', 'parca', 'parceiro', 'vo', 'vovo'
+    ];
+    const normName = normalizeText(name || '');
+    for (const kw of friendKeywords) {
+      if (kw && normName.includes(kw)) return true;
+    }
+    const normText = normalizeText(text || '');
+    if (normText && /\b(te amo|saudades|sumido|e ai sumido|eae sumido|partiu|churras|churrasco|cerveja|breja|futebol|pelada|bora sair|casa da mae|minha mae|vem ca|vem pra ca|manda um pix emprestado|meu mano|fala tu|salve mano)\b/.test(normText)) {
+      return true;
+    }
+    return false;
+  }
+
+  identifyContact(
+    jid: string,
+    pushName?: string,
+    messageText?: string,
+    leadRecord?: any,
+    extraIgnoredTerms?: string[]
+  ): { type: ContactType; reason: string; isAmigo: boolean; contact: ClassifiedContact } {
+    const cleanId = this.extractCleanId(jid);
+    const now = Date.now();
+    let contact = this.classifiedContacts.get(cleanId);
+
+    // 1. Se já está registrado e foi definido MANUALMENTE pelo usuário: respeita 100%!
+    if (contact && contact.classifiedBy === 'manual') {
+      if (messageText) {
+        contact.lastMessageSnippet = messageText.slice(0, 120);
+        contact.lastInteractionAt = now;
+        contact.totalMessages = (contact.totalMessages || 0) + 1;
+        this.saveContactsDatabase();
+      }
+      return {
+        type: contact.type,
+        reason: contact.reason || `Definido manualmente como ${contact.type === 'amigo' ? 'Amigo' : 'Cliente'}`,
+        isAmigo: contact.type === 'amigo',
+        contact,
+      };
+    }
+
+    const normName = normalizeText(pushName || contact?.name || leadRecord?.name || '');
+    const normText = normalizeText(messageText || '');
+    const cleanPhone = cleanId;
+
+    // 2. Termos pessoais, familiares e gírias de amizade
+    const friendKeywords = [
+      'dengosa', 'leticia', 'leticia tomais', 'namorada', 'namorado', 'esposa', 'marido',
+      'amor', 'mae', 'pai', 'irmao', 'irma', 'filho', 'filha', 'tia', 'tio', 'primo', 'prima',
+      'amigo', 'amiga', 'brother', 'mano', 'parca', 'parceiro', 'vo', 'vovo'
+    ];
+
+    if (extraIgnoredTerms && Array.isArray(extraIgnoredTerms)) {
+      for (const t of extraIgnoredTerms) {
+        const nt = normalizeText(t);
+        if (nt && !friendKeywords.includes(nt)) friendKeywords.push(nt);
+      }
+    }
+
+    let isFriendByTerm = false;
+    let matchedReason = '';
+
+    for (const kw of friendKeywords) {
+      if (!kw) continue;
+      const cleanKwDigits = kw.replace(/\D/g, '');
+      if (cleanKwDigits.length >= 8 && (cleanId.includes(cleanKwDigits) || cleanKwDigits.includes(cleanId))) {
+        isFriendByTerm = true;
+        matchedReason = `Número cadastrado na lista de amigos/família (${kw})`;
+        break;
+      }
+      if (normName.includes(kw)) {
+        isFriendByTerm = true;
+        matchedReason = `Nome ou apelido pessoal identificado: "${kw}"`;
+        break;
+      }
+    }
+
+    if (!isFriendByTerm && normText) {
+      if (/\b(te amo|saudades|sumido|e ai sumido|eae sumido|partiu|churras|churrasco|cerveja|breja|futebol|pelada|bora sair|casa da mae|minha mae|vem ca|vem pra ca|manda um pix emprestado|meu mano|fala tu|salve mano)\b/.test(normText)) {
+        isFriendByTerm = true;
+        matchedReason = `Expressão pessoal/informal detectada na conversa`;
+      }
+    }
+
+    if (isFriendByTerm) {
+      const updatedContact: ClassifiedContact = {
+        id: cleanId,
+        jid,
+        name: pushName || contact?.name || `Amigo (${cleanPhone.slice(-4)})`,
+        phone: cleanPhone,
+        type: 'amigo',
+        category: 'Amigo / Pessoal',
+        confidence: 'alta',
+        reason: matchedReason,
+        classifiedBy: contact?.classifiedBy || 'auto_detect',
+        lastMessageSnippet: messageText ? messageText.slice(0, 120) : (contact?.lastMessageSnippet || ''),
+        lastMessageSender: 'client',
+        lastInteractionAt: now,
+        createdAt: contact?.createdAt || now,
+        totalMessages: (contact?.totalMessages || 0) + (messageText ? 1 : 0),
+        botStatus: 'silenciado',
+        notes: contact?.notes || 'Identificado como contato pessoal/amigo. O robô não responderá com mensagens comerciais.',
+      };
+      this.classifiedContacts.set(cleanId, updatedContact);
+      this.saveContactsDatabase();
+      return { type: 'amigo', reason: matchedReason, isAmigo: true, contact: updatedContact };
+    }
+
+    // 3. Sinais de CLIENTE / COMERCIAL:
+    let isCommercialLead = false;
+    let commercialReason = '';
+
+    if (leadRecord) {
+      isCommercialLead = true;
+      commercialReason = leadRecord?.templateName ? `Disparo Comercial (${leadRecord.templateName})` : 'Lead cadastrado no Radar';
+    } else if (normText) {
+      if (/\b(preco|quanto custa|quanto e|quanto que ta|valor|orcamento|orcar|tabela|servico|servicos|site|software|sistema|automacao|bot|prospeccao|radar|vendas|empresa|negocio|contratar|plano|mensalidade|pix|pagamento|cartao|nota fiscal|garantia|endereco|horario|atendimento|portfolio|catalogo|lead|proposta|solucao)\b/.test(normText)) {
+        isCommercialLead = true;
+        commercialReason = `Termo comercial detectado: interesse em produtos/serviços`;
+      }
+    }
+
+    // 4. Se não for amigo comprovado, em ambiente de negócios novo contato é tratado como CLIENTE (Lead Novo)
+    // para que a pessoa NUNCA fique no vácuo sem atendimento!
+    const finalType: ContactType = 'cliente';
+    const finalReason = isCommercialLead ? commercialReason : 'Novo contato WhatsApp (Potencial Cliente)';
+    const finalCategory = isCommercialLead ? 'Cliente Comercial' : 'Lead Novo';
+
+    const updatedContact: ClassifiedContact = {
+      id: cleanId,
+      jid,
+      name: leadRecord?.name || pushName || contact?.name || `Cliente (${cleanPhone.slice(-4)})`,
+      phone: cleanPhone,
+      type: finalType,
+      category: finalCategory,
+      confidence: isCommercialLead ? 'alta' : 'media',
+      reason: finalReason,
+      classifiedBy: contact?.classifiedBy || 'auto_detect',
+      lastMessageSnippet: messageText ? messageText.slice(0, 120) : (contact?.lastMessageSnippet || ''),
+      lastMessageSender: 'client',
+      lastInteractionAt: now,
+      createdAt: contact?.createdAt || now,
+      totalMessages: (contact?.totalMessages || 0) + (messageText ? 1 : 0),
+      botStatus: 'ativo',
+      notes: contact?.notes,
+    };
+
+    this.classifiedContacts.set(cleanId, updatedContact);
+    this.saveContactsDatabase();
+
+    return { type: 'cliente', reason: finalReason, isAmigo: false, contact: updatedContact };
+  }
+
+  getAllClassifiedContacts(filter?: { type?: string; search?: string; limit?: number }): {
+    items: ClassifiedContact[];
+    total: number;
+    stats: {
+      totalContacts: number;
+      clientsCount: number;
+      friendsCount: number;
+      botActiveCount: number;
+    };
+  } {
+    let list = Array.from(this.classifiedContacts.values());
+
+    let clientsCount = 0;
+    let friendsCount = 0;
+    let botActiveCount = 0;
+
+    for (const c of list) {
+      if (c.type === 'cliente') clientsCount++;
+      if (c.type === 'amigo') friendsCount++;
+      if (c.botStatus === 'ativo') botActiveCount++;
+    }
+
+    if (filter?.type && filter.type !== 'all') {
+      list = list.filter(c => c.type === filter.type);
+    }
+
+    if (filter?.search) {
+      const q = normalizeText(filter.search);
+      list = list.filter(c => 
+        normalizeText(c.name).includes(q) || 
+        c.phone.includes(q) || 
+        c.id.includes(q) ||
+        normalizeText(c.lastMessageSnippet).includes(q)
+      );
+    }
+
+    list.sort((a, b) => b.lastInteractionAt - a.lastInteractionAt);
+    const total = list.length;
+    if (filter?.limit && filter.limit > 0) {
+      list = list.slice(0, filter.limit);
+    }
+
+    return {
+      items: list,
+      total,
+      stats: {
+        totalContacts: this.classifiedContacts.size,
+        clientsCount,
+        friendsCount,
+        botActiveCount,
+      },
+    };
+  }
+
+  classifyContact(jidOrPhone: string, type: ContactType, name?: string, notes?: string): ClassifiedContact {
+    const cleanId = this.extractCleanId(jidOrPhone);
+    const now = Date.now();
+    let contact = this.classifiedContacts.get(cleanId);
+
+    if (!contact) {
+      contact = {
+        id: cleanId,
+        jid: `${cleanId}@s.whatsapp.net`,
+        name: name || (type === 'amigo' ? `Amigo (${cleanId.slice(-4)})` : `Cliente (${cleanId.slice(-4)})`),
+        phone: cleanId,
+        type,
+        category: type === 'amigo' ? 'Amigo / Pessoal' : 'Cliente Comercial',
+        confidence: 'alta',
+        reason: 'Definido manualmente pelo usuário',
+        classifiedBy: 'manual',
+        lastMessageSnippet: '',
+        lastMessageSender: 'client',
+        lastInteractionAt: now,
+        createdAt: now,
+        totalMessages: 0,
+        botStatus: type === 'amigo' ? 'silenciado' : 'ativo',
+        notes: notes || (type === 'amigo' ? 'Contato pessoal (Robô silenciado)' : 'Cliente comercial (Robô ativo)'),
+      };
+    } else {
+      contact.type = type;
+      contact.category = type === 'amigo' ? 'Amigo / Pessoal' : 'Cliente Comercial';
+      contact.classifiedBy = 'manual';
+      contact.reason = 'Definido manualmente pelo usuário';
+      contact.botStatus = type === 'amigo' ? 'silenciado' : 'ativo';
+      if (name) contact.name = name;
+      if (notes) contact.notes = notes;
+      contact.lastInteractionAt = now;
+    }
+
+    this.classifiedContacts.set(cleanId, contact);
+    this.saveContactsDatabase();
+
+    const conv = this.conversations.get(cleanId);
+    if (conv) {
+      conv.contactType = type;
+      if (name) conv.name = name;
+      this.saveConversationsToDisk();
+    }
+
+    this.logger.log(`Contato ${cleanId} reclassificado manualmente como "${type.toUpperCase()}".`);
+    return contact;
+  }
+
+  deleteClassifiedContact(jidOrPhone: string): boolean {
+    const cleanId = this.extractCleanId(jidOrPhone);
+    const removed = this.classifiedContacts.delete(cleanId);
+    if (removed) this.saveContactsDatabase();
+    return removed;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -269,7 +665,11 @@ export class ConversationBrainService {
   }
 
   private extractCleanId(jidOrPhone: string): string {
-    return (jidOrPhone || '').split('@')[0].replace(/\D/g, '');
+    const raw = (jidOrPhone || '').split('@')[0].trim();
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length >= 4) return digits;
+    const slug = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    return slug || `contact_${Date.now()}`;
   }
 
   getConversation(jidOrPhone: string): ClientConversation | undefined {
@@ -444,6 +844,10 @@ export class ConversationBrainService {
     if (conv.messages.length > 50) {
       conv.messages = conv.messages.slice(-50);
     }
+
+    // Identifica e sincroniza classificação do contato (Cliente vs Amigo)
+    const identified = this.identifyContact(jid, pushName, text, leadInfo);
+    conv.contactType = identified.type;
 
     this.saveConversationsToDisk();
     return conv;

@@ -43,7 +43,13 @@ import {
   MapPin,
   CreditCard,
   MessageCircle,
-  MessageSquareText
+  MessageSquareText,
+  UserCheck,
+  UserPlus,
+  Heart,
+  Briefcase,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { 
   BotFlow, 
@@ -63,6 +69,9 @@ import {
   ConversationStats,
   CustomFaqRule,
   DEFAULT_CONVERSATION_CONFIG,
+  ClassifiedContact,
+  ContactType,
+  ContactsStats,
 } from '@/lib/conversation';
 import { safeWhatsAppClient } from '../whatsapp/whatsapp-client';
 import { useLeads } from '@/hooks/use-leads';
@@ -81,12 +90,27 @@ export default function FlowsPage() {
     return list.find((f) => f.id === actId) || list[0] || null;
   });
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'knowledge' | 'conversations' | 'faq' | 'editor' | 'templates' | 'trigger'>('knowledge');
+  const [activeTab, setActiveTab] = useState<'knowledge' | 'conversations' | 'contacts' | 'faq' | 'editor' | 'templates' | 'trigger'>('contacts');
+
+  // Estado do Banco de Contatos Classificados (Clientes vs Amigos)
+  const [contacts, setContacts] = useState<ClassifiedContact[]>([]);
+  const [contactsStats, setContactsStats] = useState<ContactsStats>({
+    totalContacts: 0,
+    clientsCount: 0,
+    friendsCount: 0,
+    botActiveCount: 0,
+  });
+  const [contactsSearch, setContactsSearch] = useState('');
+  const [contactsTypeFilter, setContactsTypeFilter] = useState<'all' | 'cliente' | 'amigo'>('all');
+  const [loadingContacts, setLoadingContacts] = useState(false);
+  const [showAddFriendModal, setShowAddFriendModal] = useState(false);
+  const [newFriendInput, setNewFriendInput] = useState('');
+  const [newFriendNotes, setNewFriendNotes] = useState('');
 
   // Estado da Configuração Manual da Empresa e Conhecimento
   const [config, setConfig] = useState<ConversationConfig>(DEFAULT_CONVERSATION_CONFIG);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Estado do Banco de Dados de Conversas
   const [conversations, setConversations] = useState<ClientConversation[]>([]);
@@ -191,7 +215,15 @@ export default function FlowsPage() {
     loadFlows();
     loadConversationConfig();
     loadConversations();
+    loadClassifiedContacts();
   }, []);
+
+  // Recarrega contatos ao trocar filtro ou busca
+  useEffect(() => {
+    if (activeTab === 'contacts') {
+      loadClassifiedContacts();
+    }
+  }, [activeTab, contactsTypeFilter, contactsSearch]);
 
   // Recarrega conversas ao trocar de filtro ou busca
   useEffect(() => {
@@ -199,6 +231,95 @@ export default function FlowsPage() {
       loadConversations();
     }
   }, [activeTab, convStatusFilter, convSearch]);
+
+  // Carrega lista de contatos classificados
+  const loadClassifiedContacts = async () => {
+    try {
+      setLoadingContacts(true);
+      const params = new URLSearchParams();
+      if (contactsTypeFilter !== 'all') params.append('type', contactsTypeFilter);
+      if (contactsSearch) params.append('search', contactsSearch);
+
+      const res = await safeWhatsAppClient.get(`/whatsapp/contacts?${params.toString()}`);
+      if (res.data?.success && res.data?.data) {
+        setContacts(res.data.data.items || []);
+        if (res.data.data.stats) {
+          setContactsStats(res.data.data.stats);
+        }
+      }
+    } catch (e: any) {
+      console.warn('Erro ao carregar contatos classificados:', e);
+    } finally {
+      setLoadingContacts(false);
+    }
+  };
+
+  const handleToggleContactType = async (jidOrPhone: string, newType: ContactType, name?: string) => {
+    try {
+      const res = await safeWhatsAppClient.post('/whatsapp/contacts/classify', {
+        jid: jidOrPhone,
+        type: newType,
+        name,
+      });
+      if (res.data?.success) {
+        toast.success(newType === 'amigo' 
+          ? 'Contato marcado como Amigo! Robô silenciado para conversas pessoais.' 
+          : 'Contato marcado como Cliente! Robô ativará fluxo de atendimento.');
+        loadClassifiedContacts();
+        loadConversations();
+      }
+    } catch {
+      toast.error('Erro ao atualizar classificação do contato.');
+    }
+  };
+
+  const handleAddFriend = async () => {
+    if (!newFriendInput.trim()) {
+      toast.error('Por favor informe o nome ou telefone do amigo.');
+      return;
+    }
+    try {
+      const res = await safeWhatsAppClient.post('/whatsapp/contacts/add-friend', {
+        phoneOrName: newFriendInput.trim(),
+        notes: newFriendNotes.trim() || 'Cadastrado manualmente como Amigo',
+      });
+      if (res.data?.success) {
+        toast.success(`"${newFriendInput}" cadastrado como Amigo!`);
+        setShowAddFriendModal(false);
+        setNewFriendInput('');
+        setNewFriendNotes('');
+        loadClassifiedContacts();
+      }
+    } catch {
+      toast.error('Erro ao cadastrar amigo.');
+    }
+  };
+
+  const handleClearHumanSilence = async (id?: string) => {
+    try {
+      const res = await safeWhatsAppClient.post('/whatsapp/contacts/clear-silence', { id });
+      if (res.data?.success) {
+        toast.success(res.data?.message || 'Silêncio liberado!');
+        loadClassifiedContacts();
+        loadConversations();
+      }
+    } catch {
+      toast.error('Erro ao liberar silêncio.');
+    }
+  };
+
+  const handleDeleteContact = async (id: string) => {
+    if (!confirm('Deseja remover este contato da base?')) return;
+    try {
+      const res = await safeWhatsAppClient.delete(`/whatsapp/contacts/${id}`);
+      if (res.data?.success) {
+        toast.success('Contato removido.');
+        loadClassifiedContacts();
+      }
+    } catch {
+      toast.error('Erro ao remover contato.');
+    }
+  };
 
   // Salvar configuração manual do negócio
   const handleSaveConfig = async (newConf?: ConversationConfig) => {
@@ -641,6 +762,20 @@ export default function FlowsPage() {
           }`}
         >
           <Database className="w-4 h-4 text-blue-500" /> Banco de Conversas ({convStats.totalConversations})
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('contacts');
+            loadClassifiedContacts();
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
+            activeTab === 'contacts'
+              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
+          }`}
+        >
+          <Users className="w-4 h-4 text-emerald-500" /> Identificação de Contatos (Clientes vs Amigos) ({contactsStats.totalContacts})
         </button>
 
         <button
@@ -1139,20 +1274,33 @@ export default function FlowsPage() {
                         </p>
                       </div>
 
-                      {/* Badge de Temperatura */}
-                      {conv.leadTemperature === 'quente' ? (
-                        <Badge className="bg-amber-500 text-white text-[10px] flex items-center gap-1">
-                          <Flame className="w-3 h-3" /> Quente
-                        </Badge>
-                      ) : conv.leadTemperature === 'morno' ? (
-                        <Badge variant="outline" className="border-amber-500/40 text-amber-600 text-[10px]">
-                          ⚡ Morno
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-slate-500 text-[10px]">
-                          ❄️ Frio
-                        </Badge>
-                      )}
+                      <div className="flex flex-col items-end gap-1">
+                        {/* Badge Cliente vs Amigo */}
+                        {conv.contactType === 'amigo' ? (
+                          <Badge className="bg-indigo-500/10 text-indigo-600 border border-indigo-500/30 text-[9px] font-bold px-2 py-0.5">
+                            🤝 Amigo (Silenciado)
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 text-[9px] font-bold px-2 py-0.5">
+                            💼 Cliente (Robô Ativo)
+                          </Badge>
+                        )}
+
+                        {/* Badge de Temperatura */}
+                        {conv.leadTemperature === 'quente' ? (
+                          <Badge className="bg-amber-500 text-white text-[9px] flex items-center gap-1">
+                            <Flame className="w-3 h-3" /> Quente
+                          </Badge>
+                        ) : conv.leadTemperature === 'morno' ? (
+                          <Badge variant="outline" className="border-amber-500/40 text-amber-600 text-[9px]">
+                            ⚡ Morno
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-slate-500 text-[9px]">
+                            ❄️ Frio
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </CardHeader>
 
@@ -1196,8 +1344,28 @@ export default function FlowsPage() {
                           setSelectedConversation(conv);
                         }}
                       >
-                        <MessageSquareText className="w-3.5 h-3.5 mr-1" /> Ver Conversa Completa
+                        <MessageSquareText className="w-3.5 h-3.5 mr-1" /> Ver Conversa
                       </Button>
+
+                      {/* Botão de Alternância Rápida Amigo vs Cliente */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`h-8 px-2.5 text-[11px] font-bold shrink-0 ${
+                          conv.contactType === 'amigo'
+                            ? 'border-emerald-500/40 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+                            : 'border-indigo-500/40 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30'
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const nextType = conv.contactType === 'amigo' ? 'cliente' : 'amigo';
+                          handleToggleContactType(conv.id, nextType, conv.name);
+                        }}
+                        title={conv.contactType === 'amigo' ? 'Mudar para Cliente Comercial (Robô responderá)' : 'Mudar para Amigo Pessoal (Robô silenciado)'}
+                      >
+                        {conv.contactType === 'amigo' ? '💼 Tornar Cliente' : '🤝 Marcar Amigo'}
+                      </Button>
+
                       <Button
                         size="sm"
                         variant="ghost"
@@ -1313,8 +1481,357 @@ export default function FlowsPage() {
       )}
 
       {/* ════════════════════════════════════════════════════════════════════ */}
-      {/* ABA 3: PERGUNTAS E RESPOSTAS RÁPIDAS (FAQ & GATILHOS MANUAIS)        */}
+      {/* ABA: IDENTIFICAÇÃO DE CONTATOS (CLIENTES vs AMIGOS / PESSOAL)       */}
       {/* ════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'contacts' && (
+        <div className="space-y-6">
+          {/* Métricas do Banco de Contatos */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="border-slate-200 dark:border-zinc-800 p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">Total de Contatos</p>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">{contactsStats.totalContacts}</h3>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="border-slate-200 dark:border-zinc-800 p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <Briefcase className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">Clientes Comerciais</p>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">{contactsStats.clientsCount}</h3>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="border-slate-200 dark:border-zinc-800 p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                  <Heart className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">Amigos & Pessoal</p>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">{contactsStats.friendsCount}</h3>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="border-slate-200 dark:border-zinc-800 p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">Robô Automático</p>
+                  <h3 className="text-xl font-bold text-emerald-600 dark:text-emerald-400">100% Ativo</h3>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* Banner Explicativo Inteligente */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-blue-500/10 to-transparent border border-emerald-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-500" />
+                Separação Inteligente: Clientes Comerciais vs Amigos e Família
+              </h4>
+              <p className="text-xs text-slate-600 dark:text-zinc-300 max-w-3xl leading-relaxed">
+                Quando um <strong>Cliente</strong> manda mensagem, o robô responde instantaneamente com o fluxo comercial ativo e tira dúvidas de orçamento. Para <strong>Amigos e Familiares</strong>, o robô silencia automaticamente para preservar suas conversas pessoais normais.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                size="sm"
+                onClick={() => setShowAddFriendModal(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs h-9 shadow-sm"
+              >
+                <UserPlus className="w-4 h-4 mr-1.5" /> + Cadastrar Amigo
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleClearHumanSilence()}
+                className="text-xs h-9 border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                title="Libera pausas temporárias para todos os clientes"
+              >
+                <RotateCcw className="w-3.5 h-3.5 mr-1" /> Liberar Silêncios
+              </Button>
+            </div>
+          </div>
+
+          {/* Barra de Filtros e Busca de Contatos */}
+          <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-slate-200 dark:border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+            <div className="relative w-full sm:w-96">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Input
+                value={contactsSearch}
+                onChange={e => setContactsSearch(e.target.value)}
+                placeholder="Buscar por contato, nome ou número..."
+                className="pl-9 pr-8 h-9 text-xs"
+              />
+              {contactsSearch && (
+                <button
+                  onClick={() => setContactsSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto">
+              <div className="flex items-center p-1 bg-slate-100 dark:bg-zinc-800 rounded-lg text-xs">
+                <button
+                  onClick={() => setContactsTypeFilter('all')}
+                  className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+                    contactsTypeFilter === 'all'
+                      ? 'bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  Todos ({contactsStats.totalContacts})
+                </button>
+                <button
+                  onClick={() => setContactsTypeFilter('cliente')}
+                  className={`px-3 py-1.5 rounded-md font-semibold transition-all flex items-center gap-1 ${
+                    contactsTypeFilter === 'cliente'
+                      ? 'bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      : 'text-slate-500 hover:text-emerald-600'
+                  }`}
+                >
+                  <Briefcase className="w-3.5 h-3.5" /> Clientes ({contactsStats.clientsCount})
+                </button>
+                <button
+                  onClick={() => setContactsTypeFilter('amigo')}
+                  className={`px-3 py-1.5 rounded-md font-semibold transition-all flex items-center gap-1 ${
+                    contactsTypeFilter === 'amigo'
+                      ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                      : 'text-slate-500 hover:text-indigo-600'
+                  }`}
+                >
+                  <Heart className="w-3.5 h-3.5" /> Amigos ({contactsStats.friendsCount})
+                </button>
+              </div>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={loadClassifiedContacts}
+                disabled={loadingContacts}
+                className="text-xs h-9"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loadingContacts ? 'animate-spin' : ''}`} />
+                Atualizar
+              </Button>
+            </div>
+          </div>
+
+          {/* Grid de Contatos */}
+          {contacts.length === 0 ? (
+            <div className="text-center py-16 bg-white dark:bg-zinc-900 rounded-2xl border border-dashed border-slate-300 dark:border-zinc-800">
+              <Users className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+              <p className="text-sm font-bold text-slate-700 dark:text-zinc-300">Nenhum contato encontrado</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1 max-w-md mx-auto">
+                Assim que você receber mensagens no WhatsApp ou cadastrar amigos, eles aparecerão aqui com identificação automática.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {contacts.map(c => (
+                <Card
+                  key={c.id}
+                  className={`transition-all border ${
+                    c.type === 'amigo'
+                      ? 'border-indigo-500/20 bg-indigo-500/[0.02] dark:border-indigo-500/30'
+                      : 'border-emerald-500/20 bg-emerald-500/[0.02] dark:border-emerald-500/30'
+                  }`}
+                >
+                  <CardHeader className="pb-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm shrink-0 shadow-xs ${
+                          c.type === 'amigo'
+                            ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20'
+                            : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                        }`}>
+                          {c.name ? c.name.charAt(0).toUpperCase() : (c.type === 'amigo' ? 'A' : 'C')}
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                            {c.name}
+                          </h4>
+                          <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
+                            {c.phone}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Badge Principal */}
+                      {c.type === 'amigo' ? (
+                        <Badge className="bg-indigo-500 text-white text-[10px] font-bold px-2 py-0.5 flex items-center gap-1 shrink-0">
+                          <Heart className="w-3 h-3" /> Amigo (Silenciado)
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 flex items-center gap-1 shrink-0">
+                          <Briefcase className="w-3 h-3" /> Cliente (Robô Ativo)
+                        </Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+
+                  <CardContent className="pt-0 space-y-2.5 text-xs">
+                    {/* Tag de Motivo de Reconhecimento */}
+                    <div className="p-2 rounded-xl bg-slate-100/80 dark:bg-zinc-800/80 border border-slate-200/60 dark:border-zinc-700/60 text-[11px]">
+                      <div className="flex items-center gap-1.5 text-slate-600 dark:text-zinc-300 font-medium">
+                        <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
+                        <span className="truncate">{c.reason || 'Identificação automática'}</span>
+                      </div>
+                      {c.notes && (
+                        <p className="text-[10px] text-slate-400 mt-1 italic truncate">{c.notes}</p>
+                      )}
+                    </div>
+
+                    {/* Última Mensagem */}
+                    {c.lastMessageSnippet && (
+                      <div className="p-2 rounded-lg bg-slate-50 dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 text-[11px] text-slate-700 dark:text-zinc-300 line-clamp-2">
+                        <span className="font-semibold text-slate-500">
+                          {c.lastMessageSender === 'client' ? 'Ele(a): ' : c.lastMessageSender === 'bot' ? 'Robô: ' : 'Weverton: '}
+                        </span>
+                        "{c.lastMessageSnippet}"
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between border-t border-slate-100 dark:border-zinc-800 pt-2 text-[10px] text-slate-400">
+                      <span>{c.totalMessages || 0} mensagens</span>
+                      <span>{new Date(c.lastInteractionAt).toLocaleDateString([], { day: '2-digit', month: '2-digit' })} às {new Date(c.lastInteractionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+
+                    {/* Ações com 1 clique */}
+                    <div className="flex items-center gap-2 pt-1">
+                      {c.type === 'cliente' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full text-xs font-semibold h-8 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+                          onClick={() => handleToggleContactType(c.id, 'amigo', c.name)}
+                        >
+                          <Heart className="w-3.5 h-3.5 mr-1.5" /> Mudar para Amigo
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full text-xs font-semibold h-8 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                          onClick={() => handleToggleContactType(c.id, 'cliente', c.name)}
+                        >
+                          <Briefcase className="w-3.5 h-3.5 mr-1.5" /> Mudar para Cliente
+                        </Button>
+                      )}
+
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 p-0 text-slate-400 hover:text-rose-500 shrink-0"
+                        onClick={() => handleDeleteContact(c.id)}
+                        title="Remover da base de contatos"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Modal de Cadastrar Amigo */}
+          {showAddFriendModal && (
+            <div 
+              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+              onClick={() => setShowAddFriendModal(false)}
+            >
+              <div 
+                className="bg-white dark:bg-zinc-950 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-zinc-800 space-y-4"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600">
+                      <Heart className="w-5 h-5" />
+                    </div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">Cadastrar Amigo / Pessoal</h3>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowAddFriendModal(false)}
+                    className="h-8 w-8 p-0 rounded-full"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                <p className="text-xs text-slate-500 dark:text-zinc-400">
+                  Cadastre o nome ou telefone de um amigo ou familiar. O robô nunca enviará scripts ou mensagens comerciais de fluxo para ele.
+                </p>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 dark:text-zinc-300 block mb-1">
+                      Nome ou Telefone do Amigo
+                    </label>
+                    <Input
+                      value={newFriendInput}
+                      onChange={e => setNewFriendInput(e.target.value)}
+                      placeholder="Ex: Letícia, Marcos, 92991234567..."
+                      className="text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 dark:text-zinc-300 block mb-1">
+                      Observação / Relação (Opcional)
+                    </label>
+                    <Input
+                      value={newFriendNotes}
+                      onChange={e => setNewFriendNotes(e.target.value)}
+                      placeholder="Ex: Namorada, Amigo de infância, Família..."
+                      className="text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowAddFriendModal(false)}
+                    className="text-xs"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleAddFriend}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs"
+                  >
+                    <Check className="w-3.5 h-3.5 mr-1" /> Salvar como Amigo
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {activeTab === 'faq' && (
         <Card className="border-slate-200 dark:border-zinc-800 shadow-xs">
           <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">

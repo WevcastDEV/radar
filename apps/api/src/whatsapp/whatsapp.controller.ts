@@ -492,5 +492,76 @@ export class WhatsappController {
       data: result,
     };
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 👥 BANCO DE DADOS DE CONTATOS (CLIENTES vs AMIGOS / PESSOAL)
+  // ═══════════════════════════════════════════════════════════════════
+
+  @Get('contacts')
+  getContacts(@Req() req: any) {
+    const type = req.query?.type as string | undefined;
+    const search = req.query?.search as string | undefined;
+    const limit = req.query?.limit ? Number(req.query.limit) : 200;
+
+    const data = this.conversationBrain.getAllClassifiedContacts({ type, search, limit });
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Post('contacts/classify')
+  classifyContact(@Body() body: { jid: string; type: 'cliente' | 'amigo'; name?: string; notes?: string }) {
+    const updated = this.conversationBrain.classifyContact(body.jid, body.type, body.name, body.notes);
+    // Se for classificado como cliente, limpa qualquer silêncio humano para que o robô possa atender imediatamente
+    if (body.type === 'cliente') {
+      this.whatsappService.clearHumanHandledChat(body.jid);
+    }
+    return {
+      success: true,
+      data: updated,
+      message: `Contato classificado com sucesso como ${body.type === 'amigo' ? 'Amigo (Robô Silenciado)' : 'Cliente (Robô Ativo)'}!`,
+    };
+  }
+
+  @Post('contacts/add-friend')
+  addFriend(@Body() body: { phoneOrName: string; notes?: string }) {
+    const raw = (body.phoneOrName || '').trim();
+    if (!raw) return { success: false, message: 'Telefone ou nome é obrigatório.' };
+
+    const contact = this.conversationBrain.classifyContact(raw, 'amigo', raw, body.notes || 'Cadastrado manualmente como Amigo/Pessoal');
+    const ignored = this.whatsappService.getIgnoredContacts();
+    if (!ignored.includes(raw)) {
+      this.whatsappService.saveIgnoredContacts([...ignored, raw]);
+    }
+
+    return {
+      success: true,
+      data: contact,
+      message: `"${raw}" cadastrado como Amigo com sucesso! O robô não enviará mensagens comerciais para ele.`,
+    };
+  }
+
+  @Delete('contacts/:id')
+  deleteContact(@Param('id') id: string) {
+    const deleted = this.conversationBrain.deleteClassifiedContact(id);
+    return {
+      success: deleted,
+      message: deleted ? 'Contato removido com sucesso.' : 'Contato não encontrado.',
+    };
+  }
+
+  @Post('contacts/clear-silence')
+  clearHumanSilence(@Body() body: { id?: string }) {
+    const res = this.whatsappService.clearHumanHandledChat(body?.id);
+    return {
+      success: true,
+      data: res,
+      message: body?.id 
+        ? 'Silêncio temporário cancelado para este contato! Robô liberado para responder.'
+        : 'Todos os silêncios temporários foram liberados! Robô operando para todos os clientes.',
+    };
+  }
 }
+
 

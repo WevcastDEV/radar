@@ -761,47 +761,70 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
+  extractBaileysText(msg: any): string {
+    if (!msg || !msg.message) return '';
+    const m = msg.message.ephemeralMessage?.message || 
+              msg.message.viewOnceMessage?.message || 
+              msg.message.viewOnceMessageV2?.message || 
+              msg.message.documentWithCaptionMessage?.message ||
+              msg.message;
+    return m.conversation || 
+           m.extendedTextMessage?.text || 
+           m.imageMessage?.caption || 
+           m.videoMessage?.caption || 
+           m.templateButtonReplyMessage?.selectedId ||
+           m.buttonsResponseMessage?.selectedButtonId ||
+           m.listResponseMessage?.singleSelectReply?.selectedRowId ||
+           '';
+  }
+
   private async handleIncomingMessage(msg: any, eventType: string, deviceSession?: DeviceSession) {
-      // Se a mensagem partiu do próprio Weverton / do seu aparelho WhatsApp:
-      if (msg.key.fromMe) {
-        // Se a mensagem foi disparada pelo próprio robô (fila ou resposta automática), NÃO é intervenção manual!
-        if (msg.key.id && this.botSentMessageIds.has(msg.key.id)) {
-          return;
-        }
-        const targetId = msg.key.remoteJid;
-        // Blindagem de grupos: Weverton falando em grupo nunca afeta atendimento comercial individual
-        if (targetId && !isGroupOrBroadcastJid(targetId) && !msg.key?.participant) {
-          this.registerHumanIntervention(targetId);
-          const humanText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || '';
-          if (humanText) {
-            try { this.conversationBrain?.recordHumanMessage(targetId, humanText); } catch {}
-          }
-        }
-        return;
-      }
+      if (!msg) return;
 
-      // Se o robô de auto-resposta estiver desativado globalmente ou para este aparelho, não processa
-      // Descadastro é processado mesmo quando as respostas automáticas estão desligadas.
-
-      if (!msg.message) return;
-
-      const senderId = msg.key.remoteJid;
+      const senderId = msg.key?.remoteJid;
       // BLINDAGEM ABSOLUTA: Ignorar grupos (@g.us), canais (@newsletter), transmissões (@broadcast) ou mensagens em grupo com participant
       if (!senderId || isGroupOrBroadcastJid(senderId) || msg.key?.participant) {
         return;
       }
 
-      const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
+      // Extrai texto limpo de qualquer encapsulamento Baileys (ephemeral, viewOnce, button, text, etc.)
+      const text = this.extractBaileysText(msg).trim();
       const pushName = msg.pushName || '';
 
-      // 💾 Gravação estruturada da mensagem do cliente no Banco de Dados de Conversas
+      // Se a mensagem partiu do próprio Weverton / do seu aparelho WhatsApp:
+      if (msg.key?.fromMe) {
+        // Se a mensagem foi disparada pelo próprio robô (fila ou resposta automática), NÃO é intervenção manual!
+        if (msg.key.id && this.botSentMessageIds.has(msg.key.id)) {
+          return;
+        }
+        const targetId = msg.key.remoteJid;
+        if (targetId && !isGroupOrBroadcastJid(targetId) && !msg.key?.participant) {
+          const msgTs = Number(msg.messageTimestamp) * 1000;
+          // Intervenção humana apenas para mensagens recentes (últimos 60s), não sync de histórico antigo
+          if (Date.now() - msgTs < 60000) {
+            this.registerHumanIntervention(targetId);
+            this.logger.log(`👤 [Intervenção Humana] Weverton enviou mensagem manual para "${targetId}". Robô aguardará em silêncio temporário.`);
+          }
+          if (text) {
+            try { this.conversationBrain?.recordHumanMessage(targetId, text); } catch {}
+          }
+        }
+        return;
+      }
+
+      // Se não há texto para processar, encerra
+      if (!text) return;
+
+      // 💾 Busca histórico de prospecção do número para enriquecimento de dados
+      const history = this.getDispatchedHistory();
+      const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
+      const matchedRecord = history.find(h => {
+        const hp = (h.phone || '').replace(/\D/g, '');
+        return hp && (rawNumber.endsWith(hp) || hp.endsWith(rawNumber));
+      });
+
+      // 💾 Gravação estruturada da mensagem no Banco de Dados de Conversas e Contatos
       try {
-        const history = this.getDispatchedHistory();
-        const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
-        const matchedRecord = history.find(h => {
-          const hp = (h.phone || '').replace(/\D/g, '');
-          return hp && (rawNumber.endsWith(hp) || hp.endsWith(rawNumber));
-        });
         this.conversationBrain?.recordClientMessage(senderId, text, pushName, matchedRecord);
       } catch (err: any) {
         this.logger.warn(`Erro no registro do banco de conversas: ${err?.message}`);
@@ -814,7 +837,7 @@ export class WhatsappService implements OnModuleInit {
           try { this.safety.recordInbound(senderId, text, timestamp); } catch {}
         }
         if (this.detectRejectionIntent(normalized)) {
-          this.logger.log(`🚫 [Desinteresse Detectado] Contato "${senderId}" informou desinteresse. Silenciando robô (só não responder, sem bloqueio permanente).`);
+          this.logger.log(`🚫 [Desinteresse Detectado] Contato "${senderId}" informou desinteresse. Silenciando robô.`);
           const session = this.userSessions.get(senderId);
           if (session?.timer) clearTimeout(session.timer);
           this.userSessions.delete(senderId);
@@ -824,39 +847,51 @@ export class WhatsappService implements OnModuleInit {
       } catch (err: any) {
         this.logger.warn(`Erro secundário no registro de inbound: ${err?.message}`);
       }
-      const isAutoReplyActive = deviceSession ? deviceSession.isAutoReplyEnabled : this.isAutoReplyEnabled;
-      if (!isAutoReplyActive || eventType !== 'notify') return;
 
-      // Registra automaticamente que o contato respondeu/interagiu para nunca mais ser re-prospectado friamente
+      const isAutoReplyActive = deviceSession ? deviceSession.isAutoReplyEnabled : this.isAutoReplyEnabled;
+      if (!isAutoReplyActive) return;
+
+      // Registra que o contato interagiu para proteger contra re-disparos frios
       this.registerAttendedPhone(senderId, pushName ? `Cliente Respondeu no WhatsApp (${pushName})` : 'Cliente Respondeu no WhatsApp');
 
-      // 1. Filtro de Segurança: Bloquear respostas para contatos pessoais e familiares (ex: Dengosa, Letícia, Mãe, Família, etc.)
+      // 👥 IDENTIFICAÇÃO DE CONTATO: CLIENTE vs AMIGO / PESSOAL (BANCO DE DADOS & RECONHECIMENTO)
+      const contactIdentification = this.conversationBrain?.identifyContact(
+        senderId,
+        pushName,
+        text,
+        matchedRecord,
+        this.getIgnoredContacts()
+      );
+
+      if (contactIdentification?.isAmigo) {
+        this.logger.log(`👥 [Auto-Reply Ignorado - Amigo/Pessoal] Contato "${pushName || senderId}" identificado como AMIGO (${contactIdentification.reason}). Robô preserva conversa pessoal e não responde.`);
+        return;
+      }
+
+      // 🛡️ Filtro de Segurança complementar: termos familiares / pessoais
       const ignoredCheck = this.isPersonalOrIgnoredContact(senderId, pushName);
       if (ignoredCheck.isIgnored) {
         this.logger.log(`🛡️ [Auto-Reply Ignorado] Contato pessoal detectado: "${pushName || senderId}" (regra: "${ignoredCheck.matchedTerm}"). Robô não responderá.`);
         return;
       }
 
-      // 2. Filtro de Intervenção Humana: Se o Weverton está conversando nesse chat recentemente
+      // 🤫 Filtro de Intervenção Humana Recente: Se Weverton respondeu há menos de 15 minutos
       if (this.isHumanHandled(senderId)) {
         const lower = text.trim().toLowerCase();
-        // O robô só reabre o atendimento se a pessoa pedir explicitamente "menu" ou "atendimento"
         if (lower === 'menu' || lower === 'atendimento' || lower === 'iniciar' || lower === 'inicio') {
           this.humanHandledChats.delete(senderId);
           this.saveHumanHandledChats();
           this.userSessions.delete(senderId);
           this.logger.log(`🔄 Cliente "${pushName || senderId}" solicitou reabertura do menu. Robô reativado para este chat.`);
         } else {
-          this.logger.log(`🤫 [Silêncio Humano] Conversa com "${pushName || senderId}" está em atendimento humano por Weverton. Robô silenciado.`);
+          this.logger.log(`🤫 [Silêncio Humano Recente] Conversa com "${pushName || senderId}" foi atendida por Weverton recentemente. Robô aguardando.`);
           return;
         }
       }
 
-      if (!text) return;
-
       this.processIncomingLeadReply(senderId, pushName, text);
-      this.logger.log('Mensagem recebida; política de envio aplicada.');
-      await this.handleBotLogic(senderId, text);
+      this.logger.log(`🤖 Atendimento automático iniciado para ${senderId} (Identificado como Cliente).`);
+      await this.handleBotLogic(senderId, text, pushName, matchedRecord);
   }
 
   // 🛡️ Reconhecimento Robusto de Desinteresse e Recusa (Fast-Exit Shield)
@@ -942,7 +977,7 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
-  private async handleBotLogic(senderId: string, text: string) {
+  private async handleBotLogic(senderId: string, text: string, pushName?: string, matchedRecord?: any) {
     const trimmed = text.trim();
     const normalized = trimmed
       .normalize('NFD')
@@ -951,55 +986,34 @@ export class WhatsappService implements OnModuleInit {
     const lower = trimmed.toLowerCase();
 
     // 🛡️ RECONHECIMENTO DE DESINTERESSE & ENCERRAMENTO IMEDIATO (PRIORIDADE ABSOLUTA #1)
-    // Executa antes de qualquer outra intenção para encerrar o mais rápido possível e com máxima cortesia
     if (this.detectRejectionIntent(normalized)) {
-      this.logger.log(`🚫 [Recusa/Desinteresse Detectado] Cliente ${senderId} informou desinteresse: "${text}". Robô silenciado (só não responder, sem bloqueio permanente).`);
-
-      // 1. Silenciamento do Robô para este contato (não responder mais automaticamente)
+      this.logger.log(`🚫 [Recusa/Desinteresse Detectado] Cliente ${senderId} informou desinteresse: "${text}". Robô silenciado.`);
       this.registerHumanIntervention(senderId);
-
-      // 2. Finaliza a sessão do robô e cancela qualquer timer pendente
       const currentSession = this.userSessions.get(senderId);
-      if (currentSession?.timer) {
-        clearTimeout(currentSession.timer);
-      }
+      if (currentSession?.timer) clearTimeout(currentSession.timer);
       this.userSessions.set(senderId, {
         step: 'FINALIZADO',
         data: { notInterested: true, rejectedAt: Date.now(), humanHandled: true }
       });
-
-      // 3. Marca o Lead Quente e histórico como "Recusado / Sem Interesse" no CRM
       this.markLeadAsRejected(senderId, text);
       return;
     }
 
     const existingSession = this.userSessions.get(senderId);
 
-    // Se a conversa já foi finalizada ou transferida para o humano, o robô NÃO envia mais mensagens automáticas
-    // a menos que o cliente digite expressamente "menu" para reabrir
+    // Se a conversa já foi finalizada ou transferida para o humano, o robô reabre se cliente digitar "menu", "inicio", etc.
     if (existingSession && existingSession.step === 'FINALIZADO') {
       const trimmedCmd = lower;
-      if (trimmedCmd === 'menu' || trimmedCmd === 'iniciar' || trimmedCmd === 'inicio' || trimmedCmd === 'cancelar') {
+      if (trimmedCmd === 'menu' || trimmedCmd === 'iniciar' || trimmedCmd === 'inicio' || trimmedCmd === 'cancelar' || trimmedCmd === 'oi' || trimmedCmd === 'ola') {
         this.userSessions.delete(senderId);
-      } else {
-        // Silêncio: o atendimento já é do Weverton / Suporte humano
-        this.logger.log(`Cliente ${senderId} já finalizado. Mensagem recebida tratada pelo atendente humano.`);
-        return;
       }
     }
 
     // 🌿 1. Processamento pelo Fluxo de Conversação Configurável Ativo (PRIORIDADE MÁXIMA)
     const activeFlow = this.botFlowService?.getActiveFlow();
     if (activeFlow && activeFlow.steps && activeFlow.steps.length > 0) {
-      const history = this.getDispatchedHistory();
-      const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
-      const matchedRecord = history.find(h => {
-        const hp = (h.phone || '').replace(/\D/g, '');
-        return hp && (rawNumber.endsWith(hp) || hp.endsWith(rawNumber));
-      });
-
       const flowResult = this.botFlowService.processMessage(senderId, text, matchedRecord);
-      if (flowResult.reply) {
+      if (flowResult && flowResult.reply) {
         await this.sendMessage(senderId, flowResult.reply, undefined, 'service');
         try {
           this.conversationBrain?.recordBotReply(senderId, flowResult.reply, flowResult.stepTitle, flowResult.action);
@@ -1012,6 +1026,7 @@ export class WhatsappService implements OnModuleInit {
         }
 
         if (flowResult.action === 'qualify_lead' || flowResult.action === 'mark_hot') {
+          const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
           const cleanDisplayPhone = this.formatPhoneForDisplay(rawNumber);
           const existing = this.hotLeads.find(h => h.jid === senderId);
           if (!existing) {
@@ -1019,8 +1034,8 @@ export class WhatsappService implements OnModuleInit {
               id: `hot-${Date.now()}`,
               phone: cleanDisplayPhone,
               jid: senderId,
-              pushName: matchedRecord?.leadName || 'Cliente',
-              leadName: matchedRecord?.leadName || 'Cliente Qualificado no Fluxo',
+              pushName: matchedRecord?.leadName || pushName || 'Cliente',
+              leadName: matchedRecord?.leadName || pushName || 'Cliente Qualificado no Fluxo',
               category: activeFlow.segment || 'Qualificado no Fluxo',
               text: `Interagiu no fluxo: ${flowResult.stepTitle || activeFlow.name}`,
               templateName: activeFlow.name,
@@ -1036,14 +1051,8 @@ export class WhatsappService implements OnModuleInit {
 
     // 🧠 2. Inteligência Conversacional & Base de Conhecimento Manual
     if (this.conversationBrain) {
-      const history = this.getDispatchedHistory();
-      const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
-      const matchedRecord = history.find(h => {
-        const hp = (h.phone || '').replace(/\D/g, '');
-        return hp && (rawNumber.endsWith(hp) || hp.endsWith(rawNumber));
-      });
-      const brainResult = this.conversationBrain.processConversationalReply(senderId, text, matchedRecord?.leadName);
-      if (brainResult.reply) {
+      const brainResult = this.conversationBrain.processConversationalReply(senderId, text, matchedRecord?.leadName || pushName);
+      if (brainResult && brainResult.reply) {
         await this.sendMessage(senderId, brainResult.reply, undefined, 'service');
         try {
           this.conversationBrain.recordBotReply(senderId, brainResult.reply, brainResult.intent || 'brain', brainResult.action);
@@ -1054,6 +1063,7 @@ export class WhatsappService implements OnModuleInit {
           this.registerHumanIntervention(senderId);
         }
         if (brainResult.action === 'qualify_lead') {
+          const rawNumber = senderId.split('@')[0].replace(/\D/g, '');
           const cleanDisplayPhone = this.formatPhoneForDisplay(rawNumber);
           const existing = this.hotLeads.find(h => h.jid === senderId);
           if (!existing) {
@@ -1061,8 +1071,8 @@ export class WhatsappService implements OnModuleInit {
               id: `hot-${Date.now()}`,
               phone: cleanDisplayPhone,
               jid: senderId,
-              pushName: matchedRecord?.leadName || 'Cliente',
-              leadName: matchedRecord?.leadName || 'Cliente Qualificado por Dúvida',
+              pushName: matchedRecord?.leadName || pushName || 'Cliente',
+              leadName: matchedRecord?.leadName || pushName || 'Cliente Qualificado por Dúvida',
               category: 'Interesse Comercial',
               text: `Interagiu com dúvida: ${brainResult.intent}`,
               templateName: 'Base de Conhecimento',
@@ -1076,182 +1086,21 @@ export class WhatsappService implements OnModuleInit {
       }
     }
 
-    // 🤖 2. Fallback: Pré-Vendedor SDR Inteligente de Custo Zero (Multi-Nicho)
-    if (this.sdrConfig && this.sdrConfig.enabled) {
-      // 1. Intenção de Preço / Orçamento
-      const isPriceIntent = /\b(quanto\s*custa|qual\s*o\s*valor|preco|orcamento|tabela|quanto\s*e|valores|custo|orcar)\b/i.test(normalized);
-      if (isPriceIntent) {
-        const reply = parseSpintax(this.sdrConfig.intentResponses.price);
-        await this.sendMessage(senderId, reply, undefined, 'service');
-        this.logger.log(`🤖 [SDR Custo Zero] Resposta de Preço/Orçamento enviada para ${senderId}`);
-        return;
-      }
+    // 🤖 3. Resposta Cordial de Acolhimento Garantida (NUNCA DEIXA O CLIENTE NO VÁCUO)
+    const clientName = pushName || matchedRecord?.leadName;
+    const fallbackReply = this.conversationBrain
+      ? this.conversationBrain.compileTemplate(
+          `{Olá|Oi}! Recebi sua mensagem. Como posso te ajudar na *{{nome_empresa}}*? Digite *menu* a qualquer momento para ver as opções ou me conte sua necessidade que o {{responsavel}} já vai te responder! 😊`,
+          clientName
+        )
+      : `Olá! Recebi sua mensagem. Como posso te ajudar? Digite *menu* para ver as opções disponíveis ou me conte o que você precisa.`;
 
-      // 2. Intenção de Interesse Positivo / Confirmação (COM DEFESA ANTI-FALSO-POSITIVO)
-      const hasNegation = /\b(nao|n|ñ|sem|nem|nunca|jamais|dispens|recus)\b/i.test(normalized);
-      const isPositiveIntent = !hasNegation && /\b(sim|tenho\s*interesse|pode\s*mandar|gostaria|pode\s*sim|quero|manda\s*ai|com\s*certeza|mande|claro|perfeito)\b/i.test(normalized);
-      if (isPositiveIntent) {
-        const reply = parseSpintax(this.sdrConfig.intentResponses.interested);
-        await this.sendMessage(senderId, reply, undefined, 'service');
-        this.logger.log(`🤖 [SDR Custo Zero] Resposta de Interesse/Catálogo enviada para ${senderId}`);
-        return;
-      }
-
-      // 3. Intenção de Mais Informações / Explicação
-      const isMoreInfoIntent = /\b(como\s*funciona|me\s*explica|detalhes|apresentacao|catalogo|portfolio|informacoes)\b/i.test(normalized);
-      if (isMoreInfoIntent) {
-        const reply = parseSpintax(this.sdrConfig.intentResponses.moreInfo);
-        await this.sendMessage(senderId, reply, undefined, 'service');
-        this.logger.log(`🤖 [SDR Custo Zero] Resposta de Detalhes enviada para ${senderId}`);
-        return;
-      }
-
-      // 4. Intenção de Atendimento Humano
-      const isHumanIntent = /\b(atendente|humano|falar\s*com|ligar|telefone|responsavel|weverton)\b/i.test(normalized);
-      if (isHumanIntent) {
-        const reply = parseSpintax(this.sdrConfig.intentResponses.human);
-        await this.sendMessage(senderId, reply, undefined, 'service');
-        this.registerHumanIntervention(senderId);
-        this.logger.log(`🤖 [SDR Custo Zero] Transferência para Humano realizada para ${senderId}`);
-        return;
-      }
-    }
-
-    const session: UserSession = this.userSessions.get(senderId) || { step: 'INICIO', data: {} };
-
-    // Cancela o timer de inatividade anterior, se houver
-    if (session.timer) {
-      clearTimeout(session.timer);
-      delete session.timer;
-    }
-
-    // Comandos explícitos para voltar ao menu inicial
-    if (lower === 'cancelar' || lower === 'menu' || lower === 'iniciar' || lower === 'inicio') {
-      session.step = 'INICIO';
-    }
-
-    switch (session.step) {
-      case 'INICIO':
-        // Se o SDR estiver ativo, mensagens gerais desconhecidas não recebem menu de câmeras/CFTV antigo:
-        // Silencia para atendimento humano manual no WhatsApp
-        if (this.sdrConfig && this.sdrConfig.enabled) {
-          this.logger.log(`🤖 [SDR Custo Zero] Mensagem de ${senderId} não mapeada para intenções conhecidas. Silenciando para intervenção humana.`);
-          this.registerHumanIntervention(senderId);
-          return;
-        }
-
-        // Se a mensagem de cordialidade estiver pausada pelo usuário, não envia saudação automática
-        if (!this.isCordialityEnabled) {
-          this.logger.log(`⏸️ [Cordialidade Pausada] Mensagem de cordialidade/boas-vindas silenciada para ${senderId}.`);
-          return;
-        }
-
-        // Envia a saudação inicial e o menu APENAS se o cliente tiver pedido explicitamente "menu"
-        await this.sendMessage(
-          senderId,
-          `Olá! Bem-vindo(a) à *${this.sdrConfig?.businessName || 'WCTech'}*! 💻\n\n` +
-          'Como podemos te ajudar?\n\n' +
-          '*1️⃣* - Criação de Sites e Landing Pages\n' +
-          '*2️⃣* - Sistemas e Aplicativos Sob Medida\n' +
-          '*3️⃣* - Automação de Processos e WhatsApp\n' +
-          '*4️⃣* - Falar com Especialista Técnico',
-          undefined,
-          'service'
-        );
-        session.step = 'MENU';
-        break;
-
-      case 'MENU':
-        if (trimmed === '1' || lower.includes('empresa') || lower.includes('condominio') || lower.includes('condomínio')) {
-          session.data.tipo = 'Empresarial';
-          await this.sendMessage(senderId, 'Ótimo! Para começarmos, qual o seu nome ou o nome da sua empresa?', undefined, 'service');
-          session.step = 'COLETA_NOME';
-        } else if (trimmed === '2' || lower.includes('residencial') || lower.includes('casa')) {
-          session.data.tipo = 'Residencial';
-          await this.sendMessage(senderId, 'Perfeito! Para começarmos, qual é o seu nome?', undefined, 'service');
-          session.step = 'COLETA_NOME';
-        } else if (trimmed === '3' || lower.includes('suporte') || lower.includes('cliente')) {
-          await this.sendMessage(senderId, 'Certo! Um de nossos técnicos de suporte já vai te atender aqui. Por favor, aguarde só um instante.', undefined, 'service');
-          session.step = 'FINALIZADO';
-        } else if (trimmed === '4' || lower.includes('weverton') || lower.includes('falar')) {
-          await this.sendMessage(senderId, 'Tudo bem! Já notifiquei o Weverton e ele entrará em contato com você aqui nesta conversa em instantes.', undefined, 'service');
-          session.step = 'FINALIZADO';
-        } else {
-          // Se a pessoa respondeu algo fora das opções do menu (ex: conversa normal):
-          session.data.invalidTries = (session.data.invalidTries || 0) + 1;
-          if (session.data.invalidTries >= 2) {
-            this.logger.log(`Cliente ${senderId} respondeu fora das opções 2x. Silenciando robô e mantendo para atendimento humano.`);
-            session.step = 'FINALIZADO';
-            this.registerHumanIntervention(senderId);
-            return;
-          }
-          await this.sendMessage(senderId, 'Por favor, digite o número da opção desejada:\n\n*1* - Empresa\n*2* - Residencial\n*3* - Suporte\n*4* - Falar com Weverton', undefined, 'service');
-        }
-        break;
-
-      case 'COLETA_NOME':
-        session.data.nome = trimmed;
-        await this.sendMessage(
-          senderId,
-          `Muito prazer, *${trimmed}*! Qual serviço você gostaria de contratar?\n\n` +
-          'Trabalhamos com:\n' +
-          '• Instalação e Manutenção de Câmeras (CFTV)\n' +
-          '• Alarme e Segurança Eletrônica\n' +
-          '• Controle de Acesso\n' +
-          '• Formatação de PC e Notebook\n' +
-          '• Criação de Sites, Sistemas e Lojas Virtuais\n\n' +
-          'Pode descrever brevemente o que você precisa:',
-          undefined,
-          'service'
-        );
-        session.step = 'COLETA_NECESSIDADE';
-        break;
-
-      case 'COLETA_NECESSIDADE':
-        session.data.necessidade = trimmed;
-        await this.sendMessage(
-          senderId,
-          `Perfeito! Entendi que você precisa de: *${trimmed}*.\n\n` +
-          `Já organizei suas informações. O Weverton assumirá o atendimento agora mesmo para te passar detalhes e orçamento.\n\n` +
-          `Aguarde só um instante!`,
-          undefined,
-          'service'
-        );
-
-        this.logger.log(
-          `\n========================================\n` +
-          `🎯 NOVO LEAD TRIADO COM SUCESSO!\n` +
-          `Nome: ${session.data.nome}\n` +
-          `Tipo: ${session.data.tipo}\n` +
-          `Necessidade: ${session.data.necessidade}\n` +
-          `Contato: ${senderId}\n` +
-          `========================================\n`
-        );
-
-        session.step = 'FINALIZADO';
-        break;
-    }
-
-    // Timer de inatividade de 5 minutos:
-    // APENAS se o cliente já começou ativamente a fornecer dados de orçamento (COLETA_NOME ou COLETA_NECESSIDADE).
-    // NUNCA no menu geral de opções e NUNCA se o Weverton já interagiu no chat.
-    if (session.step === 'COLETA_NOME' || session.step === 'COLETA_NECESSIDADE') {
-      session.timer = setTimeout(async () => {
-        const current = this.userSessions.get(senderId);
-        if (current && (current.step === 'COLETA_NOME' || current.step === 'COLETA_NECESSIDADE')) {
-          if (this.isHumanHandled(senderId)) return;
-          await this.sendMessage(
-            senderId,
-            'Oi! Percebi que você não respondeu. Gostaria de continuar seu atendimento? ⏱️\n' +
-            'Pode digitar sua resposta a qualquer momento para continuarmos de onde paramos!',
-            undefined,
-            'service'
-          );
-        }
-      }, 5 * 60 * 1000); // 5 minutos
-    }
-
-    this.userSessions.set(senderId, session);
+    await this.sendMessage(senderId, fallbackReply, undefined, 'service');
+    try {
+      this.conversationBrain?.recordBotReply(senderId, fallbackReply, 'acolhimento_cliente');
+    } catch {}
+    this.logger.log(`🤖 [Acolhimento Automático] Resposta enviada para ${senderId}`);
+    return;
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -2526,8 +2375,14 @@ export class WhatsappService implements OnModuleInit {
 
   isHumanHandled(senderId: string): boolean {
     if (!this.humanHandledChats.has(senderId)) return false;
-    // Conversas atendidas pelo atendente humano ficam em silêncio PERMANENTE (removido limite de 48h para evitar reenvio indevido)
-    // O robô só volta se o usuário remover o chat explicitamente ou se o cliente digitar "menu"
+    const lastTimestamp = this.humanHandledChats.get(senderId) || 0;
+    // Silêncio humano temporário de 15 minutos para permitir que Weverton converse sem o bot atrapalhar
+    const QUIET_PERIOD_MS = 15 * 60 * 1000;
+    if (Date.now() - lastTimestamp > QUIET_PERIOD_MS) {
+      this.humanHandledChats.delete(senderId);
+      this.saveHumanHandledChats();
+      return false;
+    }
     return true;
   }
 
@@ -2762,8 +2617,19 @@ export class WhatsappService implements OnModuleInit {
 
   // Verifica se o remetente é um contato pessoal ou familiar
   isPersonalOrIgnoredContact(senderId: string, pushName?: string): { isIgnored: boolean; matchedTerm?: string } {
-    const ignoredList = this.getIgnoredContacts();
     const cleanSenderPhone = senderId.replace(/\D/g, '');
+    // 0. Prioridade Absoluta: Classificação no Banco de Dados de Contatos
+    const classified = this.conversationBrain?.getAllClassifiedContacts().items.find(c => c.id === cleanSenderPhone || c.jid === senderId);
+    if (classified) {
+      if (classified.type === 'cliente') {
+        return { isIgnored: false };
+      }
+      if (classified.type === 'amigo') {
+        return { isIgnored: true, matchedTerm: classified.reason || 'Classificado no banco como Amigo / Pessoal' };
+      }
+    }
+
+    const ignoredList = this.getIgnoredContacts();
     const cleanSenderId = senderId.toLowerCase();
 
     // Coleta nomes possíveis: salvo na agenda do aparelho ou pushName do WhatsApp
