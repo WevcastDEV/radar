@@ -626,6 +626,68 @@ export default function FlowsPage() {
 
   const currentStep: BotStep | undefined = selectedFlow?.steps[editingStepIndex];
 
+  // Categorias do Sistema estruturadas em Colunas Horizontais Interativas
+  const categories = useMemo(() => [
+    {
+      id: 'contacts' as const,
+      label: 'Contatos & Amigos',
+      shortDesc: 'Clientes vs Amigos',
+      count: contactsStats.totalContacts,
+      countLabel: 'contatos',
+      icon: Users,
+      action: () => loadClassifiedContacts(),
+    },
+    {
+      id: 'conversations' as const,
+      label: 'Banco de Conversas',
+      shortDesc: 'Histórico Real',
+      count: convStats.totalConversations,
+      countLabel: 'salvas',
+      icon: Database,
+      action: () => loadConversations(),
+    },
+    {
+      id: 'knowledge' as const,
+      label: 'Dados da Empresa',
+      shortDesc: 'Manual & IA',
+      count: undefined,
+      countLabel: 'Configurado',
+      icon: Building2,
+    },
+    {
+      id: 'faq' as const,
+      label: 'FAQ & Gatilhos',
+      shortDesc: 'Auto-Resposta',
+      count: config.customFaq.length,
+      countLabel: 'regras',
+      icon: HelpCircle,
+    },
+    {
+      id: 'editor' as const,
+      label: 'Editor de Fluxo',
+      shortDesc: 'Árvore de Decisão',
+      count: selectedFlow?.steps.length || 0,
+      countLabel: 'etapas',
+      icon: Edit3,
+    },
+    {
+      id: 'templates' as const,
+      label: 'Modelos de Nicho',
+      shortDesc: '15 Segmentos',
+      count: flows.length,
+      countLabel: 'roteiros',
+      icon: Layers,
+    },
+    {
+      id: 'trigger' as const,
+      label: 'Disparar Leads',
+      shortDesc: 'Prospecção Ativa',
+      count: undefined,
+      countLabel: 'Campanha',
+      icon: Zap,
+    },
+  ], [contactsStats.totalContacts, convStats.totalConversations, config.customFaq.length, selectedFlow?.steps.length, flows.length]);
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       
@@ -737,97 +799,115 @@ export default function FlowsPage() {
         </div>
       </div>
 
-      {/* Navegação de Abas */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-zinc-800 pb-2 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('knowledge')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'knowledge'
-              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
-          }`}
-        >
-          <Building2 className="w-4 h-4 text-emerald-500" /> Configuração Manual & Empresa
-        </button>
+      {/* 🧭 Navegação em Colunas Horizontais com Animação Interativa de Categoria */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+              Categorias do Sistema (Colunas Interativas)
+            </span>
+            <Badge variant="outline" className="text-[10px] py-0 px-2 font-bold border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5">
+              7 Módulos
+            </Badge>
+          </div>
+          <span className="text-[11px] text-slate-400 dark:text-zinc-500 hidden sm:inline">
+            Clique na coluna desejada para alternar com animação fluida
+          </span>
+        </div>
 
-        <button
-          onClick={() => {
-            setActiveTab('conversations');
-            loadConversations();
-          }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'conversations'
-              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
-          }`}
-        >
-          <Database className="w-4 h-4 text-blue-500" /> Banco de Conversas ({convStats.totalConversations})
-        </button>
+        {/* Grade de 7 Colunas Horizontais */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-3">
+          {categories.map((cat) => {
+            const isActive = activeTab === cat.id;
+            const Icon = cat.icon;
 
-        <button
-          onClick={() => {
-            setActiveTab('contacts');
-            loadClassifiedContacts();
-          }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'contacts'
-              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
-          }`}
-        >
-          <Users className="w-4 h-4 text-emerald-500" /> Identificação de Contatos (Clientes vs Amigos) ({contactsStats.totalContacts})
-        </button>
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(cat.id);
+                  if (cat.action) cat.action();
+                }}
+                className={`group relative flex flex-col justify-between items-center text-center p-3.5 rounded-2xl border transition-all duration-300 ease-out cursor-pointer outline-none select-none ${
+                  isActive
+                    ? 'bg-white dark:bg-zinc-900 border-emerald-500 dark:border-emerald-400 ring-2 ring-emerald-500/30 shadow-lg shadow-emerald-500/10 -translate-y-1 animate-tab-select'
+                    : 'bg-slate-50/80 dark:bg-zinc-900/40 border-slate-200/90 dark:border-zinc-800/80 hover:bg-white dark:hover:bg-zinc-800/80 hover:border-slate-300 dark:hover:border-zinc-700 hover:-translate-y-0.5 hover:shadow-xs active:scale-95'
+                }`}
+              >
+                {/* Top: Ícone da Categoria e Badge Contadora */}
+                <div className="w-full flex items-center justify-between mb-2.5">
+                  <div
+                    className={`p-2.5 rounded-xl transition-all duration-300 ${
+                      isActive
+                        ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 scale-105'
+                        : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 group-hover:scale-110 group-hover:bg-emerald-50 dark:group-hover:bg-emerald-950/40 group-hover:text-emerald-600 dark:group-hover:text-emerald-400'
+                    }`}
+                  >
+                    <Icon className="w-5 h-5" />
+                  </div>
 
-        <button
-          onClick={() => setActiveTab('faq')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'faq'
-              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
-          }`}
-        >
-          <HelpCircle className="w-4 h-4 text-amber-500" /> FAQ & Gatilhos ({config.customFaq.length})
-        </button>
+                  {/* Contador ou Status */}
+                  {cat.count !== undefined ? (
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${
+                        isActive
+                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                          : 'bg-slate-200/70 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700'
+                      }`}
+                    >
+                      {cat.count}
+                    </span>
+                  ) : (
+                    <span
+                      className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                        isActive
+                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-slate-200/50 dark:bg-zinc-800/60 text-slate-500 dark:text-zinc-500'
+                      }`}
+                    >
+                      Ativo
+                    </span>
+                  )}
+                </div>
 
-        <button
-          onClick={() => setActiveTab('editor')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'editor'
-              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
-          }`}
-        >
-          <Edit3 className="w-4 h-4 text-emerald-500" /> Editor de Fluxo ({selectedFlow?.steps.length || 0} etapas)
-        </button>
+                {/* Centro: Título e Descrição */}
+                <div className="w-full flex flex-col items-center">
+                  <span
+                    className={`text-xs font-bold leading-tight transition-colors line-clamp-1 ${
+                      isActive
+                        ? 'text-slate-900 dark:text-white font-extrabold'
+                        : 'text-slate-700 dark:text-zinc-300 group-hover:text-emerald-600 dark:group-hover:text-emerald-400'
+                    }`}
+                  >
+                    {cat.label}
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-zinc-500 mt-1 line-clamp-1">
+                    {cat.count !== undefined ? `${cat.count} ${cat.countLabel}` : cat.shortDesc}
+                  </span>
+                </div>
 
-        <button
-          onClick={() => setActiveTab('templates')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'templates'
-              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
-          }`}
-        >
-          <Layers className="w-4 h-4 text-purple-500" /> Modelos por Nicho ({flows.length})
-        </button>
-
-        <button
-          onClick={() => setActiveTab('trigger')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all ${
-            activeTab === 'trigger'
-              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
-          }`}
-        >
-          <Zap className="w-4 h-4 text-amber-500" /> Acionar Clientes
-        </button>
+                {/* Base: Barra Animada Indicadora de Seleção */}
+                <div className="w-full pt-3 flex justify-center">
+                  <div
+                    className={`h-1 rounded-full transition-all duration-300 ${
+                      isActive
+                        ? 'w-10 bg-emerald-500 shadow-sm shadow-emerald-500/50'
+                        : 'w-0 bg-transparent group-hover:w-4 group-hover:bg-slate-300 dark:group-hover:bg-zinc-700'
+                    }`}
+                  />
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ════════════════════════════════════════════════════════════════════ */}
       {/* ABA 1: CONFIGURAÇÃO MANUAL & INFORMAÇÕES DA EMPRESA                  */}
       {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'knowledge' && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-tab-content">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             
             {/* Coluna Esquerda: Formulários da Empresa (8 colunas) */}
@@ -1135,7 +1215,7 @@ export default function FlowsPage() {
       {/* ABA 2: BANCO DE DADOS DE CONVERSAS (MEMÓRIA & HISTÓRICO REAL)        */}
       {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'conversations' && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-tab-content">
           
           {/* Métricas do Banco de Conversas */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1484,7 +1564,7 @@ export default function FlowsPage() {
       {/* ABA: IDENTIFICAÇÃO DE CONTATOS (CLIENTES vs AMIGOS / PESSOAL)       */}
       {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'contacts' && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-tab-content">
           {/* Métricas do Banco de Contatos */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card className="border-slate-200 dark:border-zinc-800 p-4">
@@ -1833,7 +1913,7 @@ export default function FlowsPage() {
         </div>
       )}
       {activeTab === 'faq' && (
-        <Card className="border-slate-200 dark:border-zinc-800 shadow-xs">
+        <Card className="border-slate-200 dark:border-zinc-800 shadow-xs animate-tab-content">
           <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
@@ -1975,7 +2055,7 @@ export default function FlowsPage() {
       {/* ABA 4: MODELOS PRONTOS POR TIPO DE EMPRESA                           */}
       {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'templates' && (
-        <div className="space-y-4">
+        <div className="space-y-4 animate-tab-content">
           {/* Barra de Busca de Modelos */}
           <div className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-slate-200 dark:border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
             <div className="relative w-full sm:w-96">
@@ -2090,7 +2170,7 @@ export default function FlowsPage() {
       {/* ABA 5: EDITOR DO FLUXO + SIMULADOR EM TEMPO REAL                     */}
       {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'editor' && selectedFlow && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-tab-content">
           
           {/* COLUNA ESQUERDA: EDITOR DE ETAPAS (7 Colunas) */}
           <div className="lg:col-span-7 space-y-6">
@@ -2642,7 +2722,7 @@ export default function FlowsPage() {
       {/* ABA 6: ACIONAR CLIENTES COM O FLUXO                                  */}
       {/* ════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'trigger' && selectedFlow && (
-        <Card className="border-slate-200 dark:border-zinc-800">
+        <Card className="border-slate-200 dark:border-zinc-800 animate-tab-content">
           <CardHeader className="pb-3 border-b border-slate-100 dark:border-zinc-800">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
