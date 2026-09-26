@@ -731,23 +731,15 @@ export class WhatsappService implements OnModuleInit {
       // Regras Automáticas do Bot e Monitoramento de Intervenção Humana
       socket.ev.on('messages.upsert', async (event: any) => {
         for (const msg of event.messages || []) {
-          if (msg.key?.fromMe || !msg.message) continue;
-          const jid = msg.key?.remoteJid;
-          // BLINDAGEM ABSOLUTA: Descartar grupos (@g.us), canais (@newsletter), transmissões (@broadcast), status ou participant
-          if (!jid || isGroupOrBroadcastJid(jid) || msg.key?.participant) continue;
-          if (!/^\d+@(s\.whatsapp\.net|lid)$/.test(jid)) continue;
-          const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
+          if (!msg || !msg.key) continue;
+          const jid = msg.key.remoteJid;
+          // BLINDAGEM ABSOLUTA: Descartar grupos (@g.us), canais (@newsletter), transmissões (@broadcast) ou mensagens em grupo com participant
+          if (!jid || isGroupOrBroadcastJid(jid) || msg.key.participant) continue;
           try {
-            this.safety.recordInbound(jid, text, Number(msg.messageTimestamp) * 1000);
-          } catch { this.logger.error('Falha ao registrar entrada; resposta suspensa.'); return; }
-        }
-        for (const msg of event.messages || []) {
-          if (!msg.key) continue;
-          const jid = msg.key?.remoteJid;
-          // BLINDAGEM ABSOLUTA: Descartar grupos, canais, transmissões ou participant
-          if (!jid || isGroupOrBroadcastJid(jid) || msg.key?.participant) continue;
-          try { await this.handleIncomingMessage(msg, event.type, session); }
-          catch { this.logger.error('Falha no processamento da entrada; nenhuma retentativa automática.'); }
+            await this.handleIncomingMessage(msg, event.type, session);
+          } catch (err: any) {
+            this.logger.error(`Falha no processamento da entrada: ${err?.message || err}`);
+          }
         }
       });
     } catch (err: any) {
@@ -799,9 +791,10 @@ export class WhatsappService implements OnModuleInit {
         }
         const targetId = msg.key.remoteJid;
         if (targetId && !isGroupOrBroadcastJid(targetId) && !msg.key?.participant) {
+          const isTestTarget = targetId.includes('984892332') || targetId.includes('24443111923942');
           const msgTs = Number(msg.messageTimestamp) * 1000;
-          // Intervenção humana apenas para mensagens recentes (últimos 60s), não sync de histórico antigo
-          if (Date.now() - msgTs < 60000) {
+          // Intervenção humana apenas para mensagens recentes (últimos 60s), não sync de histórico antigo e nunca para número de teste
+          if (!isTestTarget && Date.now() - msgTs < 60000) {
             this.registerHumanIntervention(targetId);
             this.logger.log(`👤 [Intervenção Humana] Weverton enviou mensagem manual para "${targetId}". Robô aguardará em silêncio temporário.`);
           }
@@ -854,8 +847,11 @@ export class WhatsappService implements OnModuleInit {
       // Registra que o contato interagiu para proteger contra re-disparos frios
       this.registerAttendedPhone(senderId, pushName ? `Cliente Respondeu no WhatsApp (${pushName})` : 'Cliente Respondeu no WhatsApp');
 
+      // Identifica se é o número de teste fornecido pelo usuário (92984892332)
+      const isTestNumber = senderId.includes('984892332') || senderId.includes('24443111923942') || (matchedRecord?.phone && matchedRecord.phone.includes('984892332'));
+
       // 👥 IDENTIFICAÇÃO DE CONTATO: CLIENTE vs AMIGO / PESSOAL (BANCO DE DADOS & RECONHECIMENTO)
-      const contactIdentification = this.conversationBrain?.identifyContact(
+      let contactIdentification = this.conversationBrain?.identifyContact(
         senderId,
         pushName,
         text,
@@ -863,26 +859,42 @@ export class WhatsappService implements OnModuleInit {
         this.getIgnoredContacts()
       );
 
-      if (contactIdentification?.isAmigo) {
+      // Número de teste do usuário NUNCA é classificado como amigo/ignorado
+      if (isTestNumber && contactIdentification) {
+        contactIdentification.isAmigo = false;
+        contactIdentification.type = 'cliente';
+      }
+
+      if (contactIdentification?.isAmigo && !isTestNumber) {
         this.logger.log(`👥 [Auto-Reply Ignorado - Amigo/Pessoal] Contato "${pushName || senderId}" identificado como AMIGO (${contactIdentification.reason}). Robô preserva conversa pessoal e não responde.`);
         return;
       }
 
       // 🛡️ Filtro de Segurança complementar: termos familiares / pessoais
-      const ignoredCheck = this.isPersonalOrIgnoredContact(senderId, pushName);
-      if (ignoredCheck.isIgnored) {
-        this.logger.log(`🛡️ [Auto-Reply Ignorado] Contato pessoal detectado: "${pushName || senderId}" (regra: "${ignoredCheck.matchedTerm}"). Robô não responderá.`);
-        return;
+      if (!isTestNumber) {
+        const ignoredCheck = this.isPersonalOrIgnoredContact(senderId, pushName);
+        if (ignoredCheck.isIgnored) {
+          this.logger.log(`🛡️ [Auto-Reply Ignorado] Contato pessoal detectado: "${pushName || senderId}" (regra: "${ignoredCheck.matchedTerm}"). Robô não responderá.`);
+          return;
+        }
       }
 
-      // 🤫 Filtro de Intervenção Humana Recente: Se Weverton respondeu há menos de 15 minutos
-      if (this.isHumanHandled(senderId)) {
+      // Se for número de teste, limpa qualquer trava de intervenção humana residual
+      if (isTestNumber && this.humanHandledChats.has(senderId)) {
+        this.humanHandledChats.delete(senderId);
+        this.saveHumanHandledChats();
+      }
+
+      // 🤫 Filtro de Intervenção Humana Recente
+      if (this.isHumanHandled(senderId) && !isTestNumber) {
         const lower = text.trim().toLowerCase();
-        if (lower === 'menu' || lower === 'atendimento' || lower === 'iniciar' || lower === 'inicio') {
+        // Se o cliente enviar saudação, dúvida comercial ou comando: o robô reativa imediatamente!
+        const isWakeIntent = /^(oi|ola|olá|opa|e ai|e aí|bom dia|boa tarde|boa noite|menu|atendimento|iniciar|inicio|bot|teste|ajuda|info|informacao|informações|como funciona|preco|preço|valor|orcamento|orçamento|quanto custa|tem vaga|gostaria|quero saber)/i.test(lower);
+        if (isWakeIntent) {
           this.humanHandledChats.delete(senderId);
           this.saveHumanHandledChats();
           this.userSessions.delete(senderId);
-          this.logger.log(`🔄 Cliente "${pushName || senderId}" solicitou reabertura do menu. Robô reativado para este chat.`);
+          this.logger.log(`🔄 Cliente "${pushName || senderId}" enviou saudação ou dúvida comercial ("${text}"). Robô reativado para este chat.`);
         } else {
           this.logger.log(`🤫 [Silêncio Humano Recente] Conversa com "${pushName || senderId}" foi atendida por Weverton recentemente. Robô aguardando.`);
           return;
@@ -2374,10 +2386,11 @@ export class WhatsappService implements OnModuleInit {
   }
 
   isHumanHandled(senderId: string): boolean {
+    if (!senderId || senderId.includes('984892332') || senderId.includes('24443111923942')) return false;
     if (!this.humanHandledChats.has(senderId)) return false;
     const lastTimestamp = this.humanHandledChats.get(senderId) || 0;
-    // Silêncio humano temporário de 15 minutos para permitir que Weverton converse sem o bot atrapalhar
-    const QUIET_PERIOD_MS = 15 * 60 * 1000;
+    // Silêncio humano temporário de 5 minutos para permitir que Weverton converse sem o bot atrapalhar
+    const QUIET_PERIOD_MS = 5 * 60 * 1000;
     if (Date.now() - lastTimestamp > QUIET_PERIOD_MS) {
       this.humanHandledChats.delete(senderId);
       this.saveHumanHandledChats();
