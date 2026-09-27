@@ -53,42 +53,53 @@ export async function requestWhatsAppApi(
   const subPath = normalizeSubPath(endpoint);
   const timeoutMs = config?.timeout || 6000;
 
-  // 1. Tenta direto na máquina local do usuário (onde o WhatsApp está conectado no PC)
+  // 1. Tenta na URL configurada de API ou na máquina local do usuário (porta 3001)
   if (typeof window !== 'undefined') {
-    try {
-      const localUrl = `http://127.0.0.1:3001/api/whatsapp${subPath}`;
-      const localRes = await fetch(localUrl, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+    const customApi = process.env.NEXT_PUBLIC_API_URL;
+    const candidateUrls: string[] = [];
+    if (customApi && !customApi.startsWith('/')) {
+      const cleanCustom = customApi.replace(/\/+$/, '').replace(/\/api$/, '') + '/api/whatsapp';
+      candidateUrls.push(`${cleanCustom}${subPath}`);
+    }
+    const localUrl = `http://127.0.0.1:3001/api/whatsapp${subPath}`;
+    if (!candidateUrls.includes(localUrl)) {
+      candidateUrls.push(localUrl);
+    }
 
-      let json: any = null;
+    for (const url of candidateUrls) {
       try {
-        json = await localRes.json();
-      } catch {
-        json = { success: localRes.ok, status: localRes.status };
-      }
+        const localRes = await fetch(url, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
 
-      if (localRes.ok) {
-        return { data: json };
-      }
+        let json: any = null;
+        try {
+          json = await localRes.json();
+        } catch {
+          json = { success: localRes.ok, status: localRes.status };
+        }
 
-      // Se a máquina local respondeu mas com erro da API (ex: 400 Bad Request / validação)
-      let errMsg = json?.message || json?.error || `Falha na requisição local (HTTP ${localRes.status})`;
-      if (Array.isArray(errMsg)) errMsg = errMsg.join(', ');
-      if (typeof errMsg !== 'string') errMsg = JSON.stringify(errMsg);
-      
-      const err = new Error(errMsg);
-      (err as any).response = { status: localRes.status, data: json };
-      throw err;
-    } catch (localErr: any) {
-      // Se for um erro lançado por nós (a máquina local respondeu status 4xx/5xx), propaga o erro
-      if (localErr?.response) {
-        throw localErr;
+        if (localRes.ok) {
+          return { data: json };
+        }
+
+        // Se o servidor respondeu com erro da API (ex: 400 Bad Request / validação)
+        let errMsg = json?.message || json?.error || `Falha na requisição (HTTP ${localRes.status})`;
+        if (Array.isArray(errMsg)) errMsg = errMsg.join(', ');
+        if (typeof errMsg !== 'string') errMsg = JSON.stringify(errMsg);
+        
+        const err = new Error(errMsg);
+        (err as any).response = { status: localRes.status, data: json };
+        throw err;
+      } catch (localErr: any) {
+        if (localErr?.response) {
+          throw localErr;
+        }
+        // Falha de rede para esta URL, tenta o próximo candidato
       }
-      // Se for falha de conexão de rede (daemon desligado / porta fechada), continua para fallback
     }
   }
 
