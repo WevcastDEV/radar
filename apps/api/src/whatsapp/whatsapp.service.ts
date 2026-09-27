@@ -839,12 +839,15 @@ export class WhatsappService implements OnModuleInit {
         }
         const targetId = msg.key.remoteJid;
         if (targetId && !isGroupOrBroadcastJid(targetId) && !msg.key?.participant) {
-          const msgTs = Number(msg.messageTimestamp) * 1000;
-          // Intervenção humana para qualquer mensagem recente (últimos 5 min) ou evento ao vivo (notify):
-          const isRecent = !msgTs || eventType === 'notify' || Math.abs(Date.now() - msgTs) < 300000;
-          if (isRecent) {
-            this.registerHumanIntervention(targetId);
-            this.logger.log(`👤 [Intervenção Humana Automática] Weverton enviou mensagem manual para "${targetId}". Robô travado em silêncio definitivo para esta conversa.`);
+          // Não silencia o número de teste do operador para permitir testes
+          if (!this.isTestNumber(targetId)) {
+            const msgTs = Number(msg.messageTimestamp) * 1000;
+            // Intervenção humana para qualquer mensagem recente (últimos 3 min) ou evento ao vivo (notify):
+            const isRecent = !msgTs || eventType === 'notify' || Math.abs(Date.now() - msgTs) < 180000;
+            if (isRecent) {
+              this.registerHumanIntervention(targetId);
+              this.logger.log(`👤 [Intervenção Humana Automática] Weverton enviou mensagem manual para "${targetId}". Robô pausado para esta conversa.`);
+            }
           }
           if (text) {
             try { this.conversationBrain?.recordHumanMessage(targetId, text); } catch {}
@@ -871,6 +874,9 @@ export class WhatsappService implements OnModuleInit {
         this.logger.warn(`Erro no registro do banco de conversas: ${err?.message}`);
       }
 
+      // 📬 REGISTRO IMEDIATO NO PAINEL DE LEADS / RESPOSTAS RECEBIDAS (Para NUNCA perder contato!)
+      this.processIncomingLeadReply(senderId, pushName, text);
+
       const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
       try {
         const timestamp = Number(msg.messageTimestamp) * 1000;
@@ -896,7 +902,24 @@ export class WhatsappService implements OnModuleInit {
       this.registerAttendedPhone(senderId, pushName ? `Cliente Respondeu no WhatsApp (${pushName})` : 'Cliente Respondeu no WhatsApp');
 
       // Identifica se é o número de teste fornecido pelo usuário (92984892332)
-      const isTestNumber = senderId.includes('984892332') || senderId.includes('24443111923942') || (matchedRecord?.phone && matchedRecord.phone.includes('984892332'));
+      const isTest = this.isTestNumber(senderId, matchedRecord?.phone);
+
+      if (isTest) {
+        // Limpa travas para que os testes do operador sempre conversem imediatamente
+        this.humanHandledChats.delete(senderId);
+        const cleanD = senderId.split('@')[0].replace(/\D/g, '');
+        if (cleanD) this.humanHandledChats.delete(cleanD);
+        const tS = this.userSessions.get(senderId);
+        if (tS && tS.step === 'FINALIZADO') {
+          this.userSessions.delete(senderId);
+        }
+        if (this.botFlowService) {
+          const fS = this.botFlowService.getSession(senderId);
+          if (fS && fS.currentStepId === 'FINALIZADO') {
+            this.botFlowService.resetSession(senderId);
+          }
+        }
+      }
 
       // 👥 IDENTIFICAÇÃO DE CONTATO: CLIENTE vs AMIGO / PESSOAL (BANCO DE DADOS & RECONHECIMENTO)
       let contactIdentification = this.conversationBrain?.identifyContact(
@@ -908,18 +931,18 @@ export class WhatsappService implements OnModuleInit {
       );
 
       // Número de teste do usuário NUNCA é classificado como amigo/ignorado
-      if (isTestNumber && contactIdentification) {
+      if (isTest && contactIdentification) {
         contactIdentification.isAmigo = false;
         contactIdentification.type = 'cliente';
       }
 
-      if (contactIdentification?.isAmigo && !isTestNumber) {
+      if (contactIdentification?.isAmigo && !isTest) {
         this.logger.log(`👥 [Auto-Reply Ignorado - Amigo/Pessoal] Contato "${pushName || senderId}" identificado como AMIGO (${contactIdentification.reason}). Robô preserva conversa pessoal e não responde.`);
         return;
       }
 
       // 🛡️ Filtro de Segurança complementar: termos familiares / pessoais
-      if (!isTestNumber) {
+      if (!isTest) {
         const ignoredCheck = this.isPersonalOrIgnoredContact(senderId, pushName);
         if (ignoredCheck.isIgnored) {
           this.logger.log(`🛡️ [Auto-Reply Ignorado] Contato pessoal detectado: "${pushName || senderId}" (regra: "${ignoredCheck.matchedTerm}"). Robô não responderá.`);
@@ -927,13 +950,12 @@ export class WhatsappService implements OnModuleInit {
         }
       }
 
-      // 🤫 Filtro de Intervenção Humana Definitivo: Se Weverton interagiu manualmente com este contato, o robô NÃO deve escrever mais!
-      if (this.isHumanHandled(senderId)) {
+      // 🤫 Filtro de Intervenção Humana: Se Weverton interagiu manualmente com este contato, o robô NÃO deve escrever mais!
+      if (!isTest && this.isHumanHandled(senderId)) {
         this.logger.log(`🤫 [Silêncio Humano Ativo] Conversa com "${pushName || senderId}" está sob atendimento de Weverton. Robô não responderá.`);
         return;
       }
 
-      this.processIncomingLeadReply(senderId, pushName, text);
       this.logger.log(`🤖 Atendimento automático iniciado para ${senderId} (Identificado como Cliente).`);
       await this.handleBotLogic(senderId, text, pushName, matchedRecord);
   }
@@ -1073,7 +1095,7 @@ export class WhatsappService implements OnModuleInit {
         } catch {}
         this.logger.log(`🌿 [FLUXO: ${activeFlow.name}] Resposta enviada para ${senderId} (Etapa: "${flowResult.stepTitle || 'Etapa'}")`);
 
-        if (flowResult.action === 'transfer_human' || flowResult.isEnd) {
+        if (flowResult.action === 'transfer_human' && !this.isTestNumber(senderId)) {
           this.registerHumanIntervention(senderId);
           this.logger.log(`🤝 [Transferência Humana] Cliente ${senderId} encaminhado para o atendente.`);
         }
@@ -2246,12 +2268,26 @@ export class WhatsappService implements OnModuleInit {
       } catch (e) {}
     }
 
-    // Registra como Lead Quente se não foi registrado nos últimos 30 minutos
-    const recentDuplicate = this.hotLeads.find(
-      h => (h.jid === senderId || h.phone === cleanDisplayPhone) && Date.now() - h.timestamp < 30 * 60 * 1000
+    // Atualiza ou insere nos Leads / Conversas Recebidas para nunca perder o contato
+    const existingIndex = this.hotLeads.findIndex(
+      h => h.jid === senderId || (cleanDisplayPhone && h.phone === cleanDisplayPhone) || (rawNumber && h.phone === rawNumber)
     );
 
-    if (!recentDuplicate) {
+    if (existingIndex >= 0) {
+      const existing = this.hotLeads[existingIndex];
+      existing.text = text;
+      existing.timestamp = Date.now();
+      existing.read = false;
+      if (pushName && !existing.pushName) existing.pushName = pushName;
+      if (isRejection) {
+        existing.isRejected = true;
+        existing.category = 'Recusado / Sem Interesse';
+      }
+      this.hotLeads.splice(existingIndex, 1);
+      this.hotLeads.unshift(existing);
+      this.saveHotLeadsToDisk();
+      this.logger.log(`📬 [MENSAGEM RECEBIDA] ${leadName} (${cleanDisplayPhone}): "${text}"`);
+    } else {
       const newHotLead: HotLeadReply = {
         id: `hot-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         phone: cleanDisplayPhone || rawNumber,
@@ -2268,7 +2304,7 @@ export class WhatsappService implements OnModuleInit {
 
       this.hotLeads = [newHotLead, ...this.hotLeads.slice(0, 199)];
       this.saveHotLeadsToDisk();
-      this.logger.log(`🔥 [LEAD QUENTE] ${leadName} (${cleanDisplayPhone}) respondeu ao ${templateName}: "${text}"`);
+      this.logger.log(`🔥 [NOVA MENSAGEM / LEAD] ${leadName} (${cleanDisplayPhone}): "${text}"`);
     }
   }
 
@@ -2501,8 +2537,53 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
+  isTestNumber(senderId?: string, phone?: string): boolean {
+    if (!senderId && !phone) return false;
+    const combined = `${senderId || ''} ${phone || ''}`.replace(/\D/g, '');
+    return combined.includes('984892332') || 
+           combined.includes('84892332') || 
+           combined.includes('24443111923942') ||
+           (senderId ? senderId.includes('24443111923942') : false);
+  }
+
+  resumeBotForContact(targetId: string): boolean {
+    if (!targetId) return false;
+    this.humanHandledChats.delete(targetId);
+    const clean = targetId.split('@')[0].replace(/\D/g, '');
+    if (clean) this.humanHandledChats.delete(clean);
+    this.saveHumanHandledChats();
+
+    this.userSessions.delete(targetId);
+    if (clean) this.userSessions.delete(clean);
+
+    if (this.botFlowService) {
+      this.botFlowService.resetSession(targetId);
+      if (clean) this.botFlowService.resetSession(clean);
+    }
+
+    if (this.conversationBrain) {
+      this.conversationBrain.setBotSilenced(targetId, false);
+      if (clean && clean !== targetId) this.conversationBrain.setBotSilenced(clean, false);
+    }
+    this.logger.log(`🤖 [Robô Reativado] Atendimento automático reativado para "${targetId}".`);
+    return true;
+  }
+
+  pauseBotForContact(targetId: string): boolean {
+    if (!targetId) return false;
+    this.registerHumanIntervention(targetId);
+    if (this.conversationBrain) {
+      this.conversationBrain.setBotSilenced(targetId, true);
+    }
+    this.logger.log(`👤 [Robô Pausado Manualmente] Atendimento assumido pelo operador para "${targetId}".`);
+    return true;
+  }
+
   isHumanHandled(senderId: string): boolean {
     if (!senderId || isGroupOrBroadcastJid(senderId)) return false;
+
+    // Número de teste do operador NUNCA é silenciado
+    if (this.isTestNumber(senderId)) return false;
 
     // 1. Verificação direta pelo JID no mapa de controle humano
     if (this.humanHandledChats.has(senderId)) return true;

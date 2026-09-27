@@ -538,6 +538,24 @@ export class WhatsappController {
     };
   }
 
+  @Post('conversations/:id/resume-bot')
+  resumeBotForContact(@Param('id') id: string) {
+    const success = this.whatsappService.resumeBotForContact(id);
+    return { success, message: 'Robô reativado com sucesso para este contato.' };
+  }
+
+  @Post('conversations/:id/pause-bot')
+  pauseBotForContact(@Param('id') id: string) {
+    const success = this.whatsappService.pauseBotForContact(id);
+    return { success, message: 'Robô pausado. Atendimento sob controle manual.' };
+  }
+
+  @Post('conversations/:id/restart-flow')
+  restartFlowForContact(@Param('id') id: string) {
+    this.whatsappService.resumeBotForContact(id);
+    return { success: true, message: 'Fluxo de conversa reiniciado para o primeiro passo.' };
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // 👥 BANCO DE DADOS DE CONTATOS (CLIENTES vs AMIGOS / PESSOAL)
   // ═══════════════════════════════════════════════════════════════════

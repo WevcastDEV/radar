@@ -284,9 +284,26 @@ export class BotFlowService {
     session.history.push({ sender: 'user', text: cleanInput, timestamp: Date.now() });
     session.lastInteractionAt = Date.now();
 
-    // Se o passo atual era de encerramento, o robô encerra ou silencia
+    // Se o passo atual era de encerramento, o robô reinicia a jornada para acolher a nova mensagem do cliente:
     if (currentStep.isEnd) {
-      return { reply: null, isEnd: true, action: 'transfer_human' };
+      this.resetSession(senderId);
+      const firstStep = flow.steps[0];
+      const newSession: UserFlowSession = {
+        flowId: flow.id,
+        currentStepId: firstStep.id,
+        collectedData: {},
+        lastInteractionAt: Date.now(),
+        history: [{ sender: 'user', text: cleanInput, timestamp: Date.now() }],
+      };
+      this.sessions.set(senderId, newSession);
+
+      const compiled = this.compileText(firstStep.message, flow, leadInfo, newSession.collectedData);
+      return {
+        reply: compiled,
+        action: firstStep.action,
+        isEnd: firstStep.isEnd,
+        stepTitle: firstStep.title,
+      };
     }
 
     let nextStep: BotStep | null = null;

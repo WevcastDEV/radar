@@ -351,8 +351,16 @@ export default function WhatsAppBotPage() {
   const [queueLastError, setQueueLastError] = useState<string | null>(null);
   const lastHandledDispatchTimeRef = useRef<number>(0);
 
-  // Aba da Fila de Leads: 'pending' (Pendentes para Disparo) ou 'dispatched' (Já Acionados)
-  const [queueTab, setQueueTab] = useState<'pending' | 'dispatched'>('pending');
+  // Aba da Fila de Leads: 'pending' (Pendentes para Disparo), 'dispatched' (Já Acionados) ou 'inbox' (Conversas Recebidas)
+  const [queueTab, setQueueTab] = useState<'pending' | 'dispatched' | 'inbox'>('pending');
+
+  // Conversas & Atendimento ao Vivo em Tempo Real (Pedido #4 do Usuário: todas as pessoas aparecem no painel)
+  const [conversationsList, setConversationsList] = useState<any[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
+  const [replyInputText, setReplyInputText] = useState('');
+  const [isSendingReply, setIsSendingReply] = useState(false);
+  const [conversationFilter, setConversationFilter] = useState<'all' | 'bot' | 'human'>('all');
+  const [conversationSearch, setConversationSearch] = useState('');
 
   // Histórico de Acionados em Pastas
   const [history, setHistory] = useState<DispatchedLeadRecord[]>([]);
@@ -492,8 +500,15 @@ export default function WhatsAppBotPage() {
     fetchIgnoredContacts();
     fetchAttendedPhones();
     fetchHotLeads();
+    fetchConversationsList();
     fetchAbAnalytics();
     fetchSdrConfig();
+
+    const livePolling = setInterval(() => {
+      fetchHotLeads();
+      fetchConversationsList();
+    }, 3500);
+    return () => clearInterval(livePolling);
   }, []);
 
   // Monitoramento dinâmico do status do WhatsApp:
@@ -856,6 +871,98 @@ export default function WhatsAppBotPage() {
       setHotLeads(prev => prev.map(h => ({ ...h, read: true })));
     } catch (e) {}
   };
+
+  // Buscar lista de conversas ao vivo (Pedido #4 do Usuário: todas as pessoas aparecem no painel)
+  const fetchConversationsList = async () => {
+    try {
+      const res = await axios.get('/whatsapp/conversations', { timeout: 3500 });
+      const data = res.data?.data;
+      if (Array.isArray(data)) {
+        setConversationsList(data);
+      }
+    } catch {}
+  };
+
+  const handleOpenConversationChat = async (conv: any) => {
+    setSelectedConversation(conv);
+    try {
+      const res = await axios.get(`/whatsapp/conversations/${conv.id}`);
+      if (res.data?.data) {
+        setSelectedConversation(res.data.data);
+      }
+    } catch {}
+  };
+
+  const handleSendConversationReply = async () => {
+    if (!selectedConversation || !replyInputText.trim()) return;
+    setIsSendingReply(true);
+    try {
+      const target = selectedConversation.jid || selectedConversation.phone;
+      await axios.post('/whatsapp/conversations/reply', {
+        to: target,
+        text: replyInputText.trim(),
+        jid: selectedConversation.jid,
+      });
+      toast.success('Mensagem enviada no WhatsApp!');
+      setReplyInputText('');
+      fetchConversationsList();
+      const res = await axios.get(`/whatsapp/conversations/${selectedConversation.id}`);
+      if (res.data?.data) {
+        setSelectedConversation(res.data.data);
+      }
+    } catch {
+      toast.error('Erro ao enviar mensagem.');
+    } finally {
+      setIsSendingReply(false);
+    }
+  };
+
+  const handleToggleBotForChat = async (conv: any, pause: boolean) => {
+    try {
+      const targetJid = conv.jid || conv.id;
+      await axios.post('/whatsapp/conversations/toggle-bot', {
+        jid: targetJid,
+        pause,
+      });
+      toast.success(pause ? 'Robô pausado para você atender.' : 'Robô reativado para responder automaticamente!');
+      fetchConversationsList();
+      if (selectedConversation && (selectedConversation.id === conv.id || selectedConversation.jid === targetJid)) {
+        setSelectedConversation((prev: any) => prev ? { ...prev, status: pause ? 'atendimento_humano' : 'em_andamento' } : null);
+      }
+    } catch {
+      toast.error('Erro ao alterar status do robô.');
+    }
+  };
+
+  const handleRestartFlowForChat = async (conv: any) => {
+    try {
+      const targetJid = conv.jid || conv.id;
+      await axios.post(`/whatsapp/conversations/${encodeURIComponent(targetJid)}/restart-flow`);
+      toast.success('Fluxo reiniciado! O robô iniciará do começo na próxima mensagem.', { icon: '🔄' });
+      fetchConversationsList();
+      if (selectedConversation && (selectedConversation.id === conv.id || selectedConversation.jid === targetJid)) {
+        const res = await axios.get(`/whatsapp/conversations/${selectedConversation.id}`);
+        if (res.data?.data) setSelectedConversation(res.data.data);
+      }
+    } catch {
+      toast.error('Erro ao reiniciar fluxo.');
+    }
+  };
+
+  const filteredConversations = useMemo(() => {
+    return conversationsList.filter(conv => {
+      if (conversationFilter === 'bot' && conv.status === 'atendimento_humano') return false;
+      if (conversationFilter === 'human' && conv.status !== 'atendimento_humano') return false;
+      if (conversationSearch.trim()) {
+        const q = conversationSearch.toLowerCase().trim();
+        const n = (conv.name || '').toLowerCase();
+        const p = (conv.phone || '').toLowerCase();
+        const m = (conv.lastMessageSnippet || '').toLowerCase();
+        return n.includes(q) || p.includes(q) || m.includes(q);
+      }
+      return true;
+    });
+  }, [conversationsList, conversationFilter, conversationSearch]);
 
   // Buscar dados do Teste A/B
   const fetchAbAnalytics = async () => {
@@ -2735,21 +2842,22 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
         <Card className="lg:col-span-5 border-border shadow-sm flex flex-col h-[760px] overflow-hidden">
           <CardHeader className="p-3.5 border-b border-border space-y-3 bg-card/40">
             {/* Seletor Principal de Abas: Pendentes vs Já Acionados (100% da largura, perfeitamente alinhado) */}
-            <div className="grid grid-cols-2 p-1 bg-accent/30 rounded-xl border border-border/80">
+            {/* Seletor Principal de Abas: Pendentes vs Já Acionados vs Conversas Recebidas */}
+            <div className="grid grid-cols-3 p-1 bg-accent/30 rounded-xl border border-border/80">
               <button
                 type="button"
                 onClick={() => setQueueTab('pending')}
-                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all ${
                   queueTab === 'pending'
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
                 }`}
               >
                 <Send className="w-3.5 h-3.5 shrink-0" />
-                <span>Pendentes</span>
+                <span className="truncate">Pendentes</span>
                 <Badge 
                   variant="outline" 
-                  className={`text-[10px] px-1.5 py-0 font-bold ml-1 border-0 ${
+                  className={`text-[10px] px-1.5 py-0 font-bold ml-0.5 border-0 ${
                     queueTab === 'pending' 
                       ? 'bg-white/20 text-white' 
                       : 'bg-accent text-muted-foreground'
@@ -2762,17 +2870,17 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
               <button
                 type="button"
                 onClick={() => setQueueTab('dispatched')}
-                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all ${
                   queueTab === 'dispatched'
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
                 }`}
               >
                 <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-300" />
-                <span>Já Acionados</span>
+                <span className="truncate">Acionados</span>
                 <Badge 
                   variant="outline" 
-                  className={`text-[10px] px-1.5 py-0 font-bold ml-1 border-0 ${
+                  className={`text-[10px] px-1.5 py-0 font-bold ml-0.5 border-0 ${
                     queueTab === 'dispatched' 
                       ? 'bg-white/20 text-white' 
                       : 'bg-accent text-muted-foreground'
@@ -2780,6 +2888,32 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                 >
                   {alreadyContactedLeads.length}
                 </Badge>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setQueueTab('inbox')}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all relative ${
+                  queueTab === 'inbox'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Conversas</span>
+                <Badge 
+                  variant="outline" 
+                  className={`text-[10px] px-1.5 py-0 font-bold ml-0.5 border-0 ${
+                    queueTab === 'inbox' 
+                      ? 'bg-white/20 text-white' 
+                      : 'bg-blue-500/20 text-blue-400'
+                  }`}
+                >
+                  {conversationsList.length}
+                </Badge>
+                {unreadHotLeadsCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                )}
               </button>
             </div>
 
@@ -2969,7 +3103,130 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
           </CardHeader>
 
           <CardContent className="p-3 overflow-y-auto flex-1 space-y-2">
-            {queueTab === 'dispatched' ? (
+            {queueTab === 'inbox' ? (
+              <div className="space-y-2">
+                {/* Filtros da Caixa de Entrada */}
+                <div className="flex items-center gap-1.5 pb-2 border-b border-border">
+                  <button
+                    type="button"
+                    onClick={() => setConversationFilter('all')}
+                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all ${
+                      conversationFilter === 'all'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-accent/40 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Todas ({conversationsList.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConversationFilter('bot')}
+                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all ${
+                      conversationFilter === 'bot'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-accent/40 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    🤖 Robô ({conversationsList.filter(c => c.status !== 'atendimento_humano').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConversationFilter('human')}
+                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all ${
+                      conversationFilter === 'human'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-accent/40 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    👤 Manual ({conversationsList.filter(c => c.status === 'atendimento_humano').length})
+                  </button>
+                </div>
+
+                {filteredConversations.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground space-y-2">
+                    <span className="text-3xl block">💬</span>
+                    <p className="text-xs font-semibold text-foreground">Nenhuma conversa encontrada</p>
+                    <p className="text-[11px] max-w-xs mx-auto">
+                      Assim que qualquer pessoa mandar uma mensagem no seu WhatsApp, ela aparecerá aqui em tempo real!
+                    </p>
+                  </div>
+                ) : (
+                  filteredConversations.map((conv: any) => {
+                    const isSelected = selectedConversation?.id === conv.id;
+                    const isHuman = conv.status === 'atendimento_humano';
+                    const rawDigits = (conv.phone || conv.id || '').replace(/\D/g, '');
+                    const waUrl = `https://wa.me/${rawDigits.length === 10 || rawDigits.length === 11 ? '55' + rawDigits : rawDigits}`;
+
+                    return (
+                      <div
+                        key={conv.id}
+                        onClick={() => handleOpenConversationChat(conv)}
+                        className={`p-3 rounded-xl border transition-all cursor-pointer space-y-1.5 ${
+                          isSelected
+                            ? 'bg-primary/10 border-primary shadow-sm'
+                            : 'bg-card/80 border-border hover:border-border/90 hover:bg-accent/30'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-xs text-foreground truncate">
+                                {conv.name || `Contato ${rawDigits.slice(-4)}`}
+                              </span>
+                              {isHuman ? (
+                                <Badge variant="outline" className="text-[9px] bg-amber-500/15 text-amber-300 border-amber-500/30 px-1 py-0 font-medium">
+                                  👤 Manual
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[9px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30 px-1 py-0 font-medium">
+                                  🤖 Robô Ativo
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground font-mono block mt-0.5">
+                              📱 {conv.phone || rawDigits}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => window.open(waUrl, '_blank')}
+                              className="h-6 w-6 p-0 text-emerald-400 hover:bg-emerald-500/15 rounded"
+                              title="Abrir no WhatsApp Web"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleToggleBotForChat(conv, !isHuman)}
+                              className={`h-6 px-1.5 text-[10px] font-medium rounded ${
+                                isHuman 
+                                  ? 'text-emerald-400 hover:bg-emerald-500/15' 
+                                  : 'text-amber-400 hover:bg-amber-500/15'
+                              }`}
+                              title={isHuman ? 'Reativar Robô para responder' : 'Pausar Robô para você conversar'}
+                            >
+                              {isHuman ? '🤖 Reativar' : '👤 Assumir'}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Snippet da última mensagem */}
+                        <div className="text-[11px] text-muted-foreground truncate bg-background/50 px-2 py-1 rounded border border-border/50">
+                          <strong className="text-foreground text-[10px] mr-1">
+                            {conv.lastMessageSender === 'bot' ? '🤖 Robô:' : conv.lastMessageSender === 'human' ? '👤 Você:' : '💬 Cliente:'}
+                          </strong>
+                          <span>{conv.lastMessageSnippet || 'Conversa iniciada'}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : queueTab === 'dispatched' ? (
               alreadyContactedLeads.length === 0 ? (
                 <div className="p-8 text-center space-y-3 border border-dashed border-border rounded-xl bg-card/40 my-2">
                   <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto">
@@ -3159,9 +3416,187 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
           </CardContent>
         </Card>
 
-        {/* Direita: Modelos de Mensagem, Criador de Modelo, Upload de Imagem & Envio (7 colunas) */}
+        {/* Direita: Modelos de Mensagem OU Chat ao Vivo de Conversas (7 colunas) */}
         <div className="lg:col-span-7 space-y-6">
-          <Card className="border-border shadow-sm">
+          {queueTab === 'inbox' ? (
+            <Card className="border-border shadow-sm flex flex-col h-[750px]">
+              {selectedConversation ? (
+                <>
+                  <CardHeader className="p-4 border-b border-border bg-accent/20 shrink-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center shrink-0 text-base">
+                          {selectedConversation.name?.charAt(0)?.toUpperCase() || 'C'}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <CardTitle className="text-sm font-bold text-foreground">
+                              {selectedConversation.name || selectedConversation.phone}
+                            </CardTitle>
+                            {selectedConversation.status === 'atendimento_humano' ? (
+                              <Badge className="bg-amber-600 text-white text-[10px] font-bold px-2 py-0.5">
+                                👤 Atendimento Manual (Robô Pausado)
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5">
+                                🤖 Robô Respondendo
+                              </Badge>
+                            )}
+                          </div>
+                          <CardDescription className="text-xs font-mono mt-0.5">
+                            📱 {selectedConversation.phone || selectedConversation.id}
+                          </CardDescription>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const raw = (selectedConversation.phone || selectedConversation.id || '').replace(/\D/g, '');
+                            const num = raw.length === 10 || raw.length === 11 ? '55' + raw : raw;
+                            window.open(`https://wa.me/${num}`, '_blank');
+                          }}
+                          className="h-8 text-xs font-semibold text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                          title="Abrir diretamente no WhatsApp Web"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5 mr-1" /> WhatsApp Web
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleToggleBotForChat(selectedConversation, selectedConversation.status !== 'atendimento_humano')}
+                          className={`h-8 text-xs font-semibold ${
+                            selectedConversation.status === 'atendimento_humano'
+                              ? 'text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10'
+                              : 'text-amber-400 border-amber-500/30 hover:bg-amber-500/10'
+                          }`}
+                        >
+                          {selectedConversation.status === 'atendimento_humano' ? (
+                            <>🤖 Reativar Robô</>
+                          ) : (
+                            <>👤 Pausar Robô (Assumir)</>
+                          )}
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleRestartFlowForChat(selectedConversation)}
+                          className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          title="Reiniciar o script do robô para o primeiro passo"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 mr-1" /> Reiniciar Fluxo
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+
+                  {/* Histórico de Mensagens */}
+                  <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#E5DDD5] dark:bg-[#0b141a]">
+                    {selectedConversation.messages && selectedConversation.messages.length > 0 ? (
+                      selectedConversation.messages.map((msg: any) => {
+                        const isClient = msg.sender === 'client';
+                        const isHuman = msg.sender === 'human';
+                        return (
+                          <div
+                            key={msg.id}
+                            className={`flex flex-col ${isClient ? 'items-start' : 'items-end'}`}
+                          >
+                            <div
+                              className={`max-w-[85%] sm:max-w-[70%] rounded-2xl p-3 shadow-xs space-y-1 ${
+                                isClient
+                                  ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 rounded-tl-none border border-slate-200 dark:border-zinc-700'
+                                  : isHuman
+                                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-950 dark:text-amber-100 rounded-tr-none border border-amber-300 dark:border-amber-700/50'
+                                    : 'bg-[#d9fdd3] dark:bg-[#005c4b] text-slate-900 dark:text-zinc-100 rounded-tr-none border border-emerald-300/40 dark:border-emerald-600/30'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-3 text-[10px] font-bold opacity-75">
+                                <span>
+                                  {isClient
+                                    ? `💬 ${selectedConversation.name || 'Cliente'}`
+                                    : isHuman
+                                      ? '👤 Você (Manual)'
+                                      : '🤖 Robô Automático'}
+                                </span>
+                                {msg.timestamp && (
+                                  <span className="font-normal font-mono">
+                                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs whitespace-pre-wrap leading-relaxed">
+                                {msg.text}
+                              </p>
+                              {msg.intentDetected && (
+                                <span className="inline-block text-[9px] bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded font-mono">
+                                  Gatilho: {msg.intentDetected}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-center py-24 text-muted-foreground space-y-2">
+                        <MessageSquare className="w-10 h-10 mx-auto text-muted-foreground/40" />
+                        <p className="text-xs font-semibold">Nenhuma mensagem registrada nesta conversa ainda.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Caixa de Envio de Resposta Direta */}
+                  <div className="p-3 border-t border-border bg-card shrink-0 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={replyInputText}
+                        onChange={(e) => setReplyInputText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendConversationReply();
+                          }
+                        }}
+                        placeholder={`Responder para ${selectedConversation.name || 'o contato'}... (Pressione Enter)`}
+                        className="text-xs h-10"
+                        disabled={isSendingReply}
+                      />
+                      <Button
+                        onClick={handleSendConversationReply}
+                        disabled={isSendingReply || !replyInputText.trim()}
+                        className="h-10 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shrink-0"
+                      >
+                        {isSendingReply ? (
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Send className="w-4 h-4 mr-1.5" /> Enviar
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      💡 Ao responder manualmente por aqui ou no seu celular, o robô pausa para que você continue o atendimento sem interrupções.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground space-y-3">
+                  <div className="w-16 h-16 rounded-full bg-primary/10 text-primary flex items-center justify-center text-2xl">
+                    💬
+                  </div>
+                  <h3 className="text-sm font-bold text-foreground">Nenhuma conversa selecionada</h3>
+                  <p className="text-xs max-w-sm">
+                    Clique em qualquer contato da lista à esquerda para abrir o histórico de mensagens e responder diretamente no WhatsApp.
+                  </p>
+                </div>
+              )}
+            </Card>
+          ) : (
+            <Card className="border-border shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
@@ -3685,7 +4120,8 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
               </div>
             </CardContent>
           </Card>
-        </div>
+        )}
+      </div>
       </div>
 
       {/* Modal Interativo para Criar e Editar Modelos com Prévia no Padrão WhatsApp */}
