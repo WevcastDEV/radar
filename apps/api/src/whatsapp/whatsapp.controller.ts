@@ -193,11 +193,22 @@ export class WhatsappController {
     return result;
   }
 
-  @Post('reconnect')
-  async reconnect(@Body() body?: { forceNewSession?: boolean }, @Headers('x-device-id') deviceId?: string) {
-    await this.whatsappService.reconnect(body?.forceNewSession ?? true, deviceId);
+  @Post('reset')
+  async resetConnection(@Headers('x-device-id') deviceId?: string) {
+    const result = await this.whatsappService.resetAndGenerateQr(deviceId);
     return {
       success: true,
+      data: result,
+      message: 'Conexão resetada com sucesso. Gerando novo QR Code limpo...',
+    };
+  }
+
+  @Post('reconnect')
+  async reconnect(@Body() body?: { forceNewSession?: boolean }, @Headers('x-device-id') deviceId?: string) {
+    const result = await this.whatsappService.reconnect(body?.forceNewSession ?? true, deviceId);
+    return {
+      success: true,
+      data: result,
       message: 'Reconexão iniciada com sucesso. O QR Code será gerado se o aparelho não estiver pareado.',
     };
   }

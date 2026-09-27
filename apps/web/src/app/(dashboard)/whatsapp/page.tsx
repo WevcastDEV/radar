@@ -729,23 +729,26 @@ export default function WhatsAppBotPage() {
   };
 
   const handleReconnectBot = async (forceNewSession = true) => {
+    return handleResetConnection();
+  };
+
+  const handleResetConnection = async () => {
     setIsGeneratingQr(true);
+    toast.loading('Redefinindo sessão e forçando novo QR Code...', { id: 'reset-qr' });
     try {
       setBotStatus(prev => ({ ...prev, connected: false, qrCode: null }));
       
-      // Envia requisição tanto pelo proxy quanto diretamente ao robô local
-      const p1 = axios.post('/whatsapp/reconnect', { forceNewSession }).catch(() => {});
+      const p1 = axios.post('/whatsapp/reset').catch(() => {});
       const p2 = (typeof window !== 'undefined')
-        ? fetch('http://127.0.0.1:3001/api/whatsapp/reconnect', {
+        ? fetch('http://127.0.0.1:3001/api/whatsapp/reset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-device-id': deviceId || getOrCreateDeviceId() },
-            body: JSON.stringify({ forceNewSession }),
-            signal: AbortSignal.timeout(3000),
+            signal: AbortSignal.timeout(6000),
           }).catch(() => {})
         : Promise.resolve();
 
-      await Promise.race([Promise.all([p1, p2]), new Promise(r => setTimeout(r, 1000))]);
-      toast.success('Solicitação enviada! Gerando novo QR Code...');
+      await Promise.race([Promise.all([p1, p2]), new Promise(r => setTimeout(r, 1200))]);
+      toast.success('Conexão resetada! Gerando novo QR Code limpo...', { id: 'reset-qr' });
 
       // Polling ativo a cada 1s até o QR Code ou status conectado chegar
       let attempts = 0;
@@ -768,13 +771,13 @@ export default function WhatsAppBotPage() {
           }
         } catch {}
 
-        if (attempts >= 12) {
+        if (attempts >= 15) {
           setIsGeneratingQr(false);
           clearInterval(pollTimer);
         }
       }, 1000);
     } catch (e) {
-      toast.error('Não foi possível solicitar a reconexão.');
+      toast.error('Erro ao redefinir WhatsApp.', { id: 'reset-qr' });
       setIsGeneratingQr(false);
     }
   };
@@ -2195,19 +2198,45 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
               {botStatus.connected ? 'WhatsApp Pareado' : 'Aparelho Desconectado'}
             </span>
             {botStatus.connected ? (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={handleDisconnectBot} 
-                className="h-6 px-1.5 text-[10px] text-destructive hover:bg-destructive/10"
-                title="Desconectar este aparelho para escanear com outro celular"
-              >
-                Trocar Aparelho
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={handleResetConnection} 
+                  disabled={isGeneratingQr}
+                  className="h-6 px-1.5 text-[10px] text-amber-500 hover:text-amber-400 hover:bg-amber-500/10 font-medium"
+                  title="Redefinir conexão e forçar novo QR Code"
+                >
+                  <RotateCcw className={`w-2.5 h-2.5 mr-1 ${isGeneratingQr ? 'animate-spin' : ''}`} />
+                  {isGeneratingQr ? 'Resetando...' : 'Redefinir'}
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={handleDisconnectBot} 
+                  className="h-6 px-1.5 text-[10px] text-destructive hover:bg-destructive/10"
+                  title="Desconectar este aparelho para escanear com outro celular"
+                >
+                  Trocar Aparelho
+                </Button>
+              </div>
             ) : (
-              <Button variant="ghost" size="sm" onClick={() => checkBotStatus({ manual: true })} className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground">
-                {isCheckingBot ? '...' : 'Atualizar'}
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={handleResetConnection} 
+                  disabled={isGeneratingQr}
+                  className="h-6 px-1.5 text-[10px] text-amber-500 hover:text-amber-400 hover:bg-amber-500/10 font-medium"
+                  title="Redefinir conexão e forçar novo QR Code"
+                >
+                  <RotateCcw className={`w-2.5 h-2.5 mr-1 ${isGeneratingQr ? 'animate-spin' : ''}`} />
+                  {isGeneratingQr ? 'Resetando...' : 'Redefinir'}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => checkBotStatus({ manual: true })} className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground">
+                  {isCheckingBot ? '...' : 'Atualizar'}
+                </Button>
+              </div>
             )}
           </div>
         </div>
@@ -2238,30 +2267,66 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                   </span>
                 </div>
                 {botStatus.qrCode ? (
-                  <div className="mt-3 p-3 bg-white rounded-xl inline-block shadow-lg border border-border">
-                    <img 
-                      src={botStatus.qrCode.startsWith('data:') ? botStatus.qrCode : `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(botStatus.qrCode)}`}
-                      alt="QR Code WhatsApp" 
-                      className="w-52 h-52 rounded-lg"
-                    />
-                    <div className="flex items-center justify-center gap-1.5 mt-2 text-[11px] text-zinc-700 font-semibold">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                      Aponte a câmera do WhatsApp deste aparelho agora
+                  <div className="mt-3 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    <div className="p-3 bg-white rounded-xl inline-block shadow-lg border border-border">
+                      <img 
+                        src={botStatus.qrCode.startsWith('data:') ? botStatus.qrCode : `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(botStatus.qrCode)}`}
+                        alt="QR Code WhatsApp" 
+                        className="w-52 h-52 rounded-lg"
+                      />
+                      <div className="flex items-center justify-center gap-1.5 mt-2 text-[11px] text-zinc-700 font-semibold">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                        Aponte a câmera do WhatsApp deste aparelho agora
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 max-w-xs">
+                      <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs">
+                        <p className="font-bold flex items-center gap-1.5 text-emerald-400">
+                          <CheckCircle2 className="w-4 h-4 shrink-0" /> QR Code Ativo & Pronto
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          No celular: WhatsApp &gt; Aparelhos conectados &gt; Conectar aparelho.
+                        </p>
+                      </div>
+
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={handleResetConnection}
+                        disabled={isGeneratingQr}
+                        className="gap-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm h-9"
+                      >
+                        <RotateCcw className={`w-3.5 h-3.5 ${isGeneratingQr ? 'animate-spin' : ''}`} />
+                        {isGeneratingQr ? 'Redefinindo...' : '⚡ Travou? Redefinir & Forçar Novo QR'}
+                      </Button>
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-3 p-4 bg-amber-500/15 border border-amber-500/30 rounded-xl flex items-center gap-3 text-xs text-amber-300">
-                    <RefreshCw className={`w-5 h-5 shrink-0 text-amber-400 ${isGeneratingQr ? 'animate-spin' : ''}`} />
-                    <div>
-                      <p className="font-semibold text-foreground">
-                        {isGeneratingQr ? 'Gerando QR Code individual para este PC...' : 'QR Code aguardando sincronização'}
-                      </p>
-                      <p className="text-muted-foreground text-[11px]">
-                        {isGeneratingQr 
-                          ? 'O robô Baileys está se comunicando com o WhatsApp. O QR Code aparecerá aqui em instantes...' 
-                          : 'Clique em "Gerar Novo QR Code" ao lado ou confirme se o INICIAR_RADAR.exe está ativo neste PC.'}
-                      </p>
+                  <div className="mt-3 p-4 bg-amber-500/15 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-amber-300">
+                    <div className="flex items-center gap-3">
+                      <RefreshCw className={`w-6 h-6 shrink-0 text-amber-400 ${isGeneratingQr ? 'animate-spin' : ''}`} />
+                      <div>
+                        <p className="font-bold text-sm text-foreground">
+                          {isGeneratingQr ? 'Gerando QR Code limpo...' : 'QR Code expirou ou não abriu'}
+                        </p>
+                        <p className="text-muted-foreground text-[11px] mt-0.5 max-w-md">
+                          {isGeneratingQr 
+                            ? 'Limpando credenciais travadas e gerando uma sessão 100% nova...' 
+                            : 'O WhatsApp encerra a tentativa após alguns minutos de inatividade. Clique ao lado para limpar travas e forçar um novo QR Code imediatamente.'}
+                        </p>
+                      </div>
                     </div>
+
+                    <Button
+                      size="sm"
+                      onClick={handleResetConnection}
+                      disabled={isGeneratingQr}
+                      className="gap-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md h-9 shrink-0 px-4"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 ${isGeneratingQr ? 'animate-spin' : ''}`} />
+                      {isGeneratingQr ? 'Redefinindo...' : '⚡ Redefinir & Abrir QR Code'}
+                    </Button>
                   </div>
                 )}
               </div>
@@ -2271,12 +2336,12 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleReconnectBot(true)}
+                onClick={handleResetConnection}
                 disabled={isGeneratingQr}
                 className="gap-1.5 border-amber-500/40 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 text-xs font-semibold"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingQr ? 'animate-spin' : ''}`} />
-                {isGeneratingQr ? 'Gerando QR Code...' : 'Gerar Novo QR Code'}
+                <RotateCcw className={`w-3.5 h-3.5 ${isGeneratingQr ? 'animate-spin' : ''}`} />
+                {isGeneratingQr ? 'Redefinindo...' : 'Redefinir WhatsApp'}
               </Button>
               <Button
                 variant="ghost"

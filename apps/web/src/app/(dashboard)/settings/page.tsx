@@ -3,12 +3,13 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertTriangle, HardDrive, Smartphone, CheckCircle2, RefreshCw, MapPin, LogOut, Database, Download, Upload, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, HardDrive, Smartphone, CheckCircle2, RefreshCw, RotateCcw, MapPin, LogOut, Database, Download, Upload, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import toast from 'react-hot-toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { BackupModal } from '@/components/leads/backup-modal';
 import { clearAllSystemData } from '@/lib/backup-manager';
+import { getOrCreateDeviceId } from '@/lib/device-id';
 
 export default function SettingsPage() {
   const confirm = useConfirm();
@@ -26,11 +27,20 @@ export default function SettingsPage() {
 
   const fetchWhatsAppStatus = async () => {
     try {
-      const res = await fetch('http://localhost:3001/api/whatsapp/status');
-      if (res.ok) {
+      const deviceId = getOrCreateDeviceId();
+      const headers = { 'x-device-id': deviceId };
+      let res = await fetch('/api/whatsapp/status', { headers, signal: AbortSignal.timeout(3000) }).catch(() => null);
+      if (!res || !res.ok) {
+        res = await fetch('http://127.0.0.1:3001/api/whatsapp/status', { headers, signal: AbortSignal.timeout(3000) }).catch(() => null);
+      }
+      if (res && res.ok) {
         const json = await res.json();
-        if (json.data) {
-          setWhatsappStatus(json.data);
+        const data = json.data || json;
+        if (data) {
+          setWhatsappStatus({
+            connected: Boolean(data.connected),
+            qrCode: data.qrCode || null,
+          });
         }
       }
     } catch {
@@ -38,24 +48,33 @@ export default function SettingsPage() {
     }
   };
 
-  const handleReconnectWhatsApp = async (forceNewSession = true) => {
+  const handleResetWhatsApp = async () => {
     setIsReconnecting(true);
+    toast.loading('Redefinindo sessão e forçando novo QR Code...', { id: 'reset-qr' });
     try {
+      const deviceId = getOrCreateDeviceId();
       setWhatsappStatus({ connected: false, qrCode: null });
-      await fetch('http://localhost:3001/api/whatsapp/reconnect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ forceNewSession }),
-      });
-      toast.success('Gerando novo QR Code... Aponte a câmera!');
-      setTimeout(fetchWhatsAppStatus, 1200);
+
+      const headers = { 'Content-Type': 'application/json', 'x-device-id': deviceId };
+      const p1 = fetch('/api/whatsapp/reset', { method: 'POST', headers, signal: AbortSignal.timeout(5000) }).catch(() => {});
+      const p2 = fetch('http://127.0.0.1:3001/api/whatsapp/reset', { method: 'POST', headers, signal: AbortSignal.timeout(5000) }).catch(() => {});
+
+      await Promise.race([Promise.all([p1, p2]), new Promise(r => setTimeout(r, 1200))]);
+      toast.success('Conexão resetada! Aponte a câmera para o QR Code.', { id: 'reset-qr' });
+
+      setTimeout(fetchWhatsAppStatus, 1000);
       setTimeout(fetchWhatsAppStatus, 2500);
       setTimeout(fetchWhatsAppStatus, 4500);
+      setTimeout(fetchWhatsAppStatus, 7000);
     } catch {
-      toast.error('Erro ao solicitar novo QR Code');
+      toast.error('Erro ao redefinir WhatsApp', { id: 'reset-qr' });
     } finally {
       setIsReconnecting(false);
     }
+  };
+
+  const handleReconnectWhatsApp = async (forceNewSession = true) => {
+    return handleResetWhatsApp();
   };
 
   const handleDisconnectWhatsApp = async () => {
@@ -71,8 +90,12 @@ export default function SettingsPage() {
     if (confirmed) {
       setIsReconnecting(true);
       try {
+        const deviceId = getOrCreateDeviceId();
         setWhatsappStatus({ connected: false, qrCode: null });
-        await fetch('http://localhost:3001/api/whatsapp/disconnect', { method: 'POST' });
+        const headers = { 'Content-Type': 'application/json', 'x-device-id': deviceId };
+        await fetch('/api/whatsapp/disconnect', { method: 'POST', headers }).catch(() => {
+          return fetch('http://127.0.0.1:3001/api/whatsapp/disconnect', { method: 'POST', headers });
+        });
         toast.success('WhatsApp desconectado! Gerando novo QR Code...');
         setTimeout(fetchWhatsAppStatus, 1200);
         setTimeout(fetchWhatsAppStatus, 2500);
@@ -179,16 +202,29 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </div>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleDisconnectWhatsApp}
-                  disabled={isReconnecting}
-                  className="text-xs border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0 font-medium"
-                >
-                  <LogOut className="w-3.5 h-3.5 mr-1.5" />
-                  Desconectar / Trocar Aparelho
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleResetWhatsApp}
+                    disabled={isReconnecting}
+                    className="text-xs border-amber-500/40 text-amber-500 hover:bg-amber-500/10 shrink-0 font-medium"
+                    title="Redefinir sessão e gerar novo QR Code"
+                  >
+                    <RotateCcw className={`w-3.5 h-3.5 mr-1.5 ${isReconnecting ? 'animate-spin' : ''}`} />
+                    Redefinir Conexão
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleDisconnectWhatsApp}
+                    disabled={isReconnecting}
+                    className="text-xs border-destructive/30 text-destructive hover:bg-destructive/10 shrink-0 font-medium"
+                  >
+                    <LogOut className="w-3.5 h-3.5 mr-1.5" />
+                    Desconectar / Trocar Aparelho
+                  </Button>
+                </div>
               </div>
             ) : (
               <div className="flex flex-col sm:flex-row items-center gap-6 p-4 rounded-lg bg-card border border-border">
@@ -196,7 +232,7 @@ export default function SettingsPage() {
                   <div className="bg-white p-3 rounded-xl shadow-lg border border-border flex flex-col items-center">
                     <img 
                       src={whatsappStatus.qrCode.startsWith('data:') ? whatsappStatus.qrCode : `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(whatsappStatus.qrCode)}`}
-                      alt="QR Code WhatsApp"
+                      alt="QR Code WhatsApp" 
                       className="w-52 h-52 rounded-lg"
                     />
                     <span className="text-[11px] text-zinc-700 font-semibold mt-2 flex items-center gap-1.5">
@@ -224,12 +260,12 @@ export default function SettingsPage() {
                     <Button 
                       variant="default" 
                       size="sm" 
-                      onClick={() => handleReconnectWhatsApp(true)}
+                      onClick={handleResetWhatsApp}
                       disabled={isReconnecting}
                       className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold"
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isReconnecting ? 'animate-spin' : ''}`} />
-                      {isReconnecting ? 'Gerando QR Code...' : 'Gerar Novo QR Code'}
+                      <RotateCcw className={`w-3.5 h-3.5 mr-1.5 ${isReconnecting ? 'animate-spin' : ''}`} />
+                      {isReconnecting ? 'Redefinindo...' : '⚡ Redefinir & Forçar QR Code'}
                     </Button>
                     <Button 
                       variant="outline" 

@@ -73,6 +73,7 @@ export interface DeviceSession {
   rawQrCode: string | null;
   isConnected: boolean;
   isConnecting: boolean;
+  isConnectingTimestamp?: number;
   reconnectTimeout?: NodeJS.Timeout;
   isAutoReplyEnabled: boolean;
   isCordialityEnabled: boolean;
@@ -448,12 +449,36 @@ export class WhatsappService implements OnModuleInit {
     }, 1000);
   }
 
+  safeClearAuthFolder(folderPath: string) {
+    if (!fs.existsSync(folderPath)) return;
+    try {
+      fs.rmSync(folderPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 150 });
+      this.logger.log(`🗑️ Pasta ${folderPath} limpa com sucesso.`);
+    } catch (err: any) {
+      this.logger.warn(`Tentando limpeza alternativa arquivo a arquivo para ${folderPath}: ${err?.message}`);
+      try {
+        const files = fs.readdirSync(folderPath);
+        for (const f of files) {
+          try {
+            const full = path.join(folderPath, f);
+            if (fs.statSync(full).isDirectory()) {
+              fs.rmSync(full, { recursive: true, force: true });
+            } else {
+              fs.unlinkSync(full);
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+
   clearAuthFolder(rawDeviceId: string = 'default') {
     try {
       const session = this.getSession(rawDeviceId);
-      if (fs.existsSync(session.authFolder)) {
-        fs.rmSync(session.authFolder, { recursive: true, force: true });
-        this.logger.log(`🗑️ Pasta ${session.authFolder} limpa com sucesso.`);
+      this.safeClearAuthFolder(session.authFolder);
+      if (rawDeviceId !== 'default') {
+        const defaultFolder = path.join(process.cwd(), 'auth_info_baileys');
+        this.safeClearAuthFolder(defaultFolder);
       }
     } catch (e: any) {
       this.logger.error(`Erro ao limpar pasta auth_info_baileys: ${e?.message}`);
@@ -463,10 +488,15 @@ export class WhatsappService implements OnModuleInit {
   async connectToWhatsApp(cleanAuth: boolean = false, rawDeviceId: string = 'default') {
     const session = this.getSession(rawDeviceId);
     if (session.isConnecting) {
-      this.logger.warn(`[${session.deviceId}] Tentativa de conexão ignorada: processo de conexão já em andamento.`);
-      return;
+      const isStuck = session.isConnectingTimestamp && (Date.now() - session.isConnectingTimestamp > 25000);
+      if (!isStuck) {
+        this.logger.warn(`[${session.deviceId}] Tentativa de conexão ignorada: processo de conexão já em andamento.`);
+        return;
+      }
+      this.logger.warn(`[${session.deviceId}] Conexão anterior travada (>25s). Liberando trava isConnecting...`);
     }
     session.isConnecting = true;
+    session.isConnectingTimestamp = Date.now();
     if (session.deviceId === 'default') this.isConnecting = true;
 
     if (cleanAuth) {
@@ -513,6 +543,8 @@ export class WhatsappService implements OnModuleInit {
 
         if (qr) {
           session.rawQrCode = qr;
+          session.isConnecting = false;
+          session.isConnectingTimestamp = undefined;
           try {
             session.qrCode = await QRCode.toDataURL(qr, {
               margin: 2,
@@ -525,6 +557,7 @@ export class WhatsappService implements OnModuleInit {
           if (session.deviceId === 'default') {
             this.qrCode = session.qrCode;
             this.rawQrCode = qr;
+            this.isConnecting = false;
           }
           this.logger.log(`📱 [${session.deviceId}] Novo QR Code gerado! Pronto para leitura no painel.`);
           if (session.deviceId === 'default') {
@@ -541,6 +574,7 @@ export class WhatsappService implements OnModuleInit {
 
           session.isConnected = false;
           session.isConnecting = false;
+          session.isConnectingTimestamp = undefined;
           if (session.deviceId === 'default') {
             this.isConnected = false;
             this.isConnecting = false;
@@ -553,7 +587,7 @@ export class WhatsappService implements OnModuleInit {
           }
 
           if (isLoggedOut) {
-            this.logger.log(`[${session.deviceId}] Sessão expirada ou deslogada pelo celular. Limpando credenciais para gerar novo QR Code...`);
+            this.logger.log(`[${session.deviceId}] Sessão expirada ou deslogada pelo celular. Limpando credenciais e gerando novo QR Code limpo...`);
             session.qrCode = null;
             session.rawQrCode = null;
             this.clearAuthFolder(session.deviceId);
@@ -561,15 +595,21 @@ export class WhatsappService implements OnModuleInit {
               this.qrCode = null;
               this.rawQrCode = null;
             }
-            this.logger.warn(`[${session.deviceId}] Reconexão suspensa: reveja a sessão no painel.`);
+            // AUTO-GERAÇÃO DEFINITIVA DE NOVO QR CODE
+            session.reconnectTimeout = setTimeout(() => this.connectToWhatsApp(true, session.deviceId), 2500);
           } else {
-            // Reconexão automática por oscilação de rede
-            session.reconnectTimeout = setTimeout(() => this.connectToWhatsApp(false, session.deviceId), 4000);
+            // Se o socket fechou sem nunca ter conectado (ex: QR Code expirou após 1 minuto sem escanear):
+            // Limpa credenciais residuais expiradas para Baileys gerar um QR Code novo e válido!
+            const wasNeverConnected = !session.connectionTimestamp;
+            session.reconnectTimeout = setTimeout(() => {
+              this.connectToWhatsApp(wasNeverConnected, session.deviceId);
+            }, 3000);
           }
         } else if (connection === 'open') {
           this.logger.log(`✅ [${session.deviceId}] Bot do WhatsApp conectado com sucesso!`);
           session.isConnected = true;
           session.isConnecting = false;
+          session.isConnectingTimestamp = undefined;
           session.qrCode = null;
           session.rawQrCode = null;
           session.connectionTimestamp = Date.now();
@@ -1224,12 +1264,17 @@ export class WhatsappService implements OnModuleInit {
       this.connectToWhatsApp(false, session.deviceId).catch(() => {});
     }
 
+    const defaultSession = this.deviceSessions.get('default');
+    const isConnected = session.isConnected || (defaultSession?.isConnected ?? false);
+    const qrCode = isConnected ? null : (session.qrCode || defaultSession?.qrCode || this.qrCode || null);
+    const rawQrCode = isConnected ? null : (session.rawQrCode || defaultSession?.rawQrCode || this.rawQrCode || null);
+
     return {
       deviceId: session.deviceId,
-      connected: session.isConnected,
-      qrCode: session.qrCode,
-      rawQrCode: session.rawQrCode,
-      isConnecting: session.isConnecting,
+      connected: isConnected,
+      qrCode,
+      rawQrCode,
+      isConnecting: isConnected ? false : (session.isConnecting || (defaultSession?.isConnecting ?? false)),
       autoReplyEnabled: session.isAutoReplyEnabled,
       cordialityEnabled: session.isCordialityEnabled,
       queue: this.getQueueStatus(session.deviceId),
@@ -1618,9 +1663,79 @@ export class WhatsappService implements OnModuleInit {
     this.stopServerQueue(session.deviceId);
   }
 
-  async reconnect(forceNewSession: boolean = true, rawDeviceId?: string) {
+  async resetAndGenerateQr(rawDeviceId?: string): Promise<{ success: boolean; message: string; qrCode: string | null }> {
     const session = this.getSession(rawDeviceId);
-    this.logger.log(`🔄 [${session.deviceId}] Solicitada reconexão do WhatsApp (forceNewSession: ${forceNewSession})...`);
+    this.logger.log(`⚡ [${session.deviceId}] FORÇANDO RESET DEFINITIVO DE CONEXÃO & GERAÇÃO DE NOVO QR CODE...`);
+
+    // 1. Limpa timeouts pendentes
+    if (session.reconnectTimeout) {
+      clearTimeout(session.reconnectTimeout);
+      session.reconnectTimeout = undefined;
+    }
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = undefined;
+    }
+
+    // 2. Destrói e desvincula sockets anteriores completamente
+    const socketsToClose = [session.sock, this.sock].filter(Boolean);
+    for (const s of socketsToClose) {
+      try {
+        s?.ev?.removeAllListeners('connection.update');
+        s?.ev?.removeAllListeners('creds.update');
+        s?.ev?.removeAllListeners('messages.upsert');
+        s?.end?.(undefined);
+      } catch {}
+    }
+    session.sock = undefined;
+    this.sock = undefined;
+
+    // 3. Reseta estados em memória
+    session.isConnected = false;
+    session.isConnecting = false;
+    session.isConnectingTimestamp = undefined;
+    session.qrCode = null;
+    session.rawQrCode = null;
+    session.connectionTimestamp = undefined;
+
+    this.isConnected = false;
+    this.isConnecting = false;
+    this.qrCode = null;
+    this.rawQrCode = null;
+    this.connectionTimestamp = 0;
+
+    // 4. Pausa de 300ms para liberação de handles de arquivos pelo Windows
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // 5. Limpeza agressiva e segura de pastas de autenticação
+    this.clearAuthFolder(session.deviceId);
+
+    // 6. Inicia nova conexão do zero com cleanAuth = true
+    await this.connectToWhatsApp(true, session.deviceId);
+
+    // 7. Aguarda até 3.5 segundos para ver se o QR Code já é gerado de imediato
+    for (let i = 0; i < 7; i++) {
+      if (session.qrCode || this.qrCode) {
+        break;
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    const currentQr = session.qrCode || this.qrCode || null;
+    return {
+      success: true,
+      message: 'Conexão resetada com sucesso. Novo QR Code pronto para escaneamento.',
+      qrCode: currentQr,
+    };
+  }
+
+  async reconnect(forceNewSession: boolean = true, rawDeviceId?: string) {
+    if (forceNewSession) {
+      return this.resetAndGenerateQr(rawDeviceId);
+    }
+
+    const session = this.getSession(rawDeviceId);
+    this.logger.log(`🔄 [${session.deviceId}] Solicitada reconexão do WhatsApp (sem limpar credenciais)...`);
 
     if (session.reconnectTimeout) {
       clearTimeout(session.reconnectTimeout);
@@ -1628,9 +1743,8 @@ export class WhatsappService implements OnModuleInit {
     }
 
     session.isConnected = false;
-    session.qrCode = null;
-    session.rawQrCode = null;
     session.isConnecting = false;
+    session.isConnectingTimestamp = undefined;
 
     if (session.sock) {
       try {
@@ -1644,18 +1758,12 @@ export class WhatsappService implements OnModuleInit {
 
     if (session.deviceId === 'default') {
       this.isConnected = false;
-      this.qrCode = null;
-      this.rawQrCode = null;
       this.sock = undefined;
       this.isConnecting = false;
     }
 
-    if (forceNewSession || !session.isConnected) {
-      this.clearAuthFolder(session.deviceId);
-    }
-
     await new Promise(r => setTimeout(r, 400));
-    await this.connectToWhatsApp(forceNewSession, session.deviceId);
+    await this.connectToWhatsApp(false, session.deviceId);
   }
 
   async disconnect(rawDeviceId?: string) {
@@ -1679,6 +1787,8 @@ export class WhatsappService implements OnModuleInit {
     session.qrCode = null;
     session.rawQrCode = null;
     session.isConnecting = false;
+    session.isConnectingTimestamp = undefined;
+    session.connectionTimestamp = undefined;
     if (session.deviceId === 'default') {
       this.sock = undefined;
       this.isConnected = false;
@@ -1687,6 +1797,11 @@ export class WhatsappService implements OnModuleInit {
       this.isConnecting = false;
     }
     this.clearAuthFolder(session.deviceId);
+
+    // Imediatamente engatilha geração de novo QR Code limpo para o usuário poder escanear
+    setTimeout(() => {
+      this.connectToWhatsApp(true, session.deviceId).catch(() => {});
+    }, 1500);
   }
 
   // Normalização e geração de candidatos para números brasileiros (Manaus DDD 92 e nacional)
