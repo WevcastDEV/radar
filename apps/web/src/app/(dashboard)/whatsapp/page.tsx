@@ -2360,6 +2360,58 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
         </div>
       </div>
 
+      {/* 🚀 BANNER FIXO E DESTACADO: Conector WhatsApp PC Local */}
+      <div className="p-4 sm:p-5 rounded-2xl border-2 border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 via-emerald-900/20 to-teal-950/30 backdrop-blur-sm shadow-md flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+        <div className="flex items-start gap-3.5">
+          <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shrink-0 shadow-xs">
+            <Download className="w-6 h-6 animate-bounce" />
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-black text-base text-foreground">
+                📥 Conector Local do WhatsApp para PC
+              </span>
+              <Badge className="bg-emerald-600 text-white text-[10px] px-2 py-0.5 font-bold uppercase tracking-wider">
+                ⭐ Solução Definitiva
+              </Badge>
+              <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+                Apenas 360 KB
+              </Badge>
+              {botStatus.connected ? (
+                <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 text-[10px]">
+                  ● WhatsApp Pareado
+                </Badge>
+              ) : (
+                <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/40 text-[10px]">
+                  ○ Aguardando Conexão
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl">
+              Para manter o robô <strong>100% ativo 24 horas por dia sem cair a conexão nem travar o QR Code</strong> na nuvem, use o conector local no seu computador:
+            </p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-0.5 text-[11px] text-muted-foreground">
+              <span><strong>1.</strong> Baixe o arquivo <code>radar-conector-whatsapp.zip</code></span>
+              <span>•</span>
+              <span><strong>2.</strong> Extraia em qualquer pasta</span>
+              <span>•</span>
+              <span><strong>3.</strong> Dê 2 cliques em <code className="text-emerald-400 bg-emerald-950/80 px-1 py-0.5 rounded font-mono font-bold">INICIAR_CONECTOR.bat</code></span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center gap-2.5 shrink-0 w-full lg:w-auto">
+          <a
+            href="/api/whatsapp/download-conector"
+            download="radar-conector-whatsapp.zip"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-lg shadow-emerald-900/30 transition-all hover:scale-105 active:scale-95 cursor-pointer text-center"
+          >
+            <Download className="w-4 h-4" />
+            <span>Baixar Conector PC (.zip - 360 KB)</span>
+          </a>
+        </div>
+      </div>
+
       {/* Alerta de Desconexão / QR Code */}
       {!botStatus.connected && (
         <Card className="border-amber-500/40 bg-amber-500/10 shadow-md">

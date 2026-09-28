@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, ChevronRight, LogOut } from 'lucide-react';
+import { Search, ChevronRight, LogOut, Download } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/use-auth';
@@ -49,8 +49,8 @@ export function Navbar() {
         </div>
       </div>
 
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="relative w-full max-w-xs hidden lg:block">
+      <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+        <div className="relative w-full max-w-xs hidden xl:block">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             type="search"
@@ -58,6 +58,19 @@ export function Navbar() {
             className="w-full pl-9 h-9 text-xs border-border focus-visible:ring-1"
           />
         </div>
+
+        {/* Botão de Download do Conector Local do WhatsApp no Topo Global */}
+        <a
+          href="/api/whatsapp/download-conector"
+          download="radar-conector-whatsapp.zip"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all hover:scale-[1.03] active:scale-[0.97] border border-emerald-500/50 cursor-pointer"
+          title="Baixar Conector WhatsApp PC (360 KB) para rodar o WebSocket localmente com 1 clique"
+        >
+          <Download className="w-3.5 h-3.5 shrink-0 animate-pulse" />
+          <span className="hidden sm:inline">Baixar Conector PC</span>
+          <span className="sm:hidden">Conector PC</span>
+          <span className="text-[10px] bg-emerald-800/80 px-1 py-0.2 rounded font-mono font-normal">ZIP</span>
+        </a>
 
         <NotificationBell />
 

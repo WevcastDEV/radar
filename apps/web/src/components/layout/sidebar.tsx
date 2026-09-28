@@ -9,7 +9,7 @@ import {
   Calendar, FileText, Package,
   Building2, Users2, Target,
   BarChart3, BrainCircuit, Settings,
-  X, Plus, LogOut, GitBranch, UserCheck
+  X, Plus, LogOut, GitBranch, UserCheck, Download
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuthStore } from '@/stores/auth-store';
@@ -43,6 +43,7 @@ const navSections = [
       { title: 'Robô WhatsApp', href: '/whatsapp', icon: MessageSquare },
       { title: 'Fluxos de Conversa', href: '/flows', icon: GitBranch, badge: 'NOVO' },
       { title: 'IA Comercial', href: '/ai', icon: BrainCircuit, badge: 'IA' },
+      { title: 'Conector PC (.zip)', href: '/api/whatsapp/download-conector', icon: Download, badge: '360KB' },
     ],
   },
   {
@@ -127,6 +128,36 @@ export function Sidebar() {
             )}
             {section.items.map((item) => {
               const isActive = pathname === item.href || (item.href !== '/' && pathname?.startsWith(`${item.href}/`));
+              const isDownload = item.href.includes('/download-conector');
+
+              if (isDownload) {
+                return (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    download="radar-conector-whatsapp.zip"
+                    onClick={() => setMobileOpen(false)}
+                    className={cn(
+                      'flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30 my-0.5 shadow-xs cursor-pointer',
+                      collapsed && 'justify-center px-0'
+                    )}
+                    title={collapsed ? item.title : 'Baixar Conector Local do WhatsApp (.zip - 360 KB)'}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <item.icon className="w-4 h-4 shrink-0 text-emerald-500 animate-pulse" />
+                      {!collapsed && (
+                        <span className="truncate">{item.title}</span>
+                      )}
+                    </div>
+                    {!collapsed && 'badge' in item && item.badge && (
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase shrink-0 bg-emerald-500/20 text-emerald-500 border border-emerald-500/30">
+                        {item.badge}
+                      </span>
+                    )}
+                  </a>
+                );
+              }
+
               return (
                 <Link
                   key={item.href}
@@ -161,6 +192,38 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      {/* Card Destacado Conector WhatsApp PC */}
+      {!collapsed ? (
+        <div className="mx-2.5 my-2 p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-950/20 shadow-xs">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Download className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400 shrink-0" />
+            <span className="text-xs font-bold text-foreground">Conector WhatsApp PC</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground mb-2 leading-tight">
+            WebSocket no seu PC para conexão 24h sem desconectar.
+          </p>
+          <a
+            href="/api/whatsapp/download-conector"
+            download="radar-conector-whatsapp.zip"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-sm transition active:scale-95 text-center cursor-pointer"
+          >
+            <Download className="w-3 h-3" />
+            <span>Baixar (.zip - 360 KB)</span>
+          </a>
+        </div>
+      ) : (
+        <div className="px-2 py-1.5 flex justify-center">
+          <a
+            href="/api/whatsapp/download-conector"
+            download="radar-conector-whatsapp.zip"
+            title="Baixar Conector WhatsApp PC (.zip)"
+            className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center hover:bg-emerald-500/25 transition cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+          </a>
+        </div>
+      )}
 
       {/* Footer section */}
       <div className="border-t border-border">
