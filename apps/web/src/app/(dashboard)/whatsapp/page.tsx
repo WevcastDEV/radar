@@ -2248,6 +2248,17 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
             <span>🛡️ Anti-Reenvio ({attendedPhoneDigitsSet.size} protegidos)</span>
           </Button>
 
+          {/* Botão de Download do Conector Local do WhatsApp */}
+          <a
+            href="/api/whatsapp/download-conector"
+            download="radar-conector-whatsapp.zip"
+            className="h-9 px-3 text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 rounded-md flex items-center gap-1.5 shadow-sm transition-all"
+            title="Baixar o conector leve do WhatsApp para rodar no seu PC (360 KB)"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-400" />
+            <span>📥 Baixar Conector PC (.zip)</span>
+          </a>
+
           {/* Botão de regras de envio */}
           <Button
             onClick={() => setIsAntiBanModalOpen(true)}
@@ -2373,6 +2384,33 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                     <strong>Prefere não escanear QR Code?</strong> Use o botão <strong>⚡ WhatsApp Web</strong> em qualquer lead abaixo para abrir a conversa já pronta direto no seu navegador.
                   </span>
                 </div>
+
+                {/* Bloco de Download do Conector Local do WhatsApp */}
+                <div className="mt-3 p-3.5 bg-gradient-to-r from-emerald-500/15 via-blue-500/10 to-transparent border border-emerald-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 max-w-2xl shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                      <Download className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <span>Conector WhatsApp para PC</span>
+                        <Badge className="bg-emerald-600 text-white text-[9px] px-1.5 py-0 font-bold">Leve (360 KB)</Badge>
+                      </h4>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                        Baixe o arquivo leve para manter o WebSocket do WhatsApp rodando direto no seu PC. Dê 2 cliques e aponte a câmera!
+                      </p>
+                    </div>
+                  </div>
+
+                  <a
+                    href="/api/whatsapp/download-conector"
+                    download="radar-conector-whatsapp.zip"
+                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shrink-0 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <HardDrive className="w-4 h-4" /> Baixar Conector (.zip)
+                  </a>
+                </div>
+
                 {botStatus.qrCode ? (
                   <div className="mt-3 flex flex-col sm:flex-row items-start sm:items-center gap-4">
                     <div className="p-3 bg-white rounded-xl inline-block shadow-lg border border-border">

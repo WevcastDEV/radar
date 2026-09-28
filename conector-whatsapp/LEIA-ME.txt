@@ -1,0 +1,24 @@
+===================================================================
+     RADAR DE OPORTUNIDADES - CONECTOR LOCAL WHATSAPP
+===================================================================
+
+COMO USAR ESTE CONECTOR:
+
+1. De dois cliques no arquivo:
+   INICIAR_CONECTOR.bat
+
+2. Uma janela se abrira conectando o servico local na porta 3001.
+   (Na primeira vez, pode levar alguns segundos para configurar).
+
+3. Acesse o painel do Radar de Oportunidades no seu navegador:
+   O site detectara o conector e o QR Code aparecera diretamente na tela!
+
+4. Aponte o seu WhatsApp (Aparelhos Conectados > Conectar um Aparelho)
+   e pronto!
+
+IMPORTANTE:
+- Mantenha a janelinha do conector aberta minimizada enquanto quiser
+  usar o WhatsApp no painel.
+- O conector roda localmente no seu proprio PC, garantindo total
+  seguranca e privacidade da sua conta WhatsApp.
+===================================================================
