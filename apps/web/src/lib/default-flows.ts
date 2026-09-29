@@ -1182,5 +1182,106 @@ export const DEFAULT_BOT_FLOWS: BotFlow[] = [
       },
     ],
   },
+  // 16. SEGURANÇA DO TRABALHO & CURSOS NRs
+  {
+    id: 'flow-seguranca-nrs',
+    name: '👷‍♂️ Segurança do Trabalho & Cursos NRs',
+    segment: 'Educação Corporativa & SSMA',
+    companyName: 'NR Treinamentos & Consultoria',
+    description: 'Fluxo para empresas de consultoria em segurança do trabalho, treinamentos in-company, e cursos de normas regulamentadoras (NR-1, NR-10, NR-35, etc).',
+    isActive: true,
+    isTemplate: true,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    rejectionMessage: 'Sem problemas! Caso precise regularizar sua empresa ou treinar sua equipe no futuro, estamos à disposição.',
+    faqRules: [
+      {
+        id: 'faq-1',
+        keywords: ['certificado', 'validade', 'autenticidade', 'reciclagem'],
+        reply: 'Nossos certificados são emitidos com validade nacional, assinatura de responsável técnico e código de autenticidade para validação corporativa.',
+      },
+      {
+        id: 'faq-2',
+        keywords: ['in company', 'in-company', 'na empresa', 'incompany', 'presencial'],
+        reply: 'Sim! Realizamos treinamentos In-Company diretamente nas instalações da sua empresa, adaptando o conteúdo à realidade do seu ambiente de trabalho.',
+      },
+      {
+        id: 'faq-3',
+        keywords: ['nrs', 'quais nrs', 'lista', 'cursos', 'treinamentos'],
+        reply: 'Oferecemos treinamentos para NR-1, NR-10 (Básico e SEP), NR-35 (Trabalho em Altura), NR-33 (Espaço Confinado), NR-20, CIPA (NR-5), entre outros. Também fazemos elaboração de PGR e PCMSO.',
+      }
+    ],
+    steps: [
+      {
+        id: 'step-inicio',
+        title: 'Triagem Inicial - Consultoria vs Treinamento',
+        type: 'question_choice',
+        message: `{Olá|Oi|Tudo bem?} Aqui é o atendimento virtual da *{{minha_empresa}}*. Somos especialistas em Segurança e Saúde no Trabalho! 👷‍♂️\n\nComo posso ajudar a sua empresa hoje?\n\n*1️⃣* - Cursos e Treinamentos (NRs)\n*2️⃣* - Consultoria e Documentação (PGR, PCMSO)\n*3️⃣* - Orçamento In-Company (Na sua empresa)\n*4️⃣* - Falar com um Consultor (Humano)`,
+        options: [
+          { id: 'opt-1', key: '1', label: 'Cursos NRs', nextStepId: 'step-cursos' },
+          { id: 'opt-2', key: '2', label: 'Documentação SSMA', nextStepId: 'step-documentacao' },
+          { id: 'opt-3', key: '3', label: 'Treinamento In-Company', nextStepId: 'step-incompany' },
+          { id: 'opt-4', key: '4', label: 'Falar com Consultor', nextStepId: 'step-humano', action: 'transfer_human' },
+        ],
+      },
+      {
+        id: 'step-cursos',
+        title: 'Interesse em Treinamentos NRs',
+        type: 'question_choice',
+        message: 'Excelente! Nós temos uma grade completa de NRs teóricas e práticas.\n\nQual treinamento você está buscando no momento?\n\n*A* - NR-10 (Elétrica / SEP)\n*B* - NR-35 (Trabalho em Altura)\n*C* - CIPA (NR-5)\n*D* - NR-33 (Espaços Confinados)\n*E* - Outros cursos',
+        options: [
+          { id: 'opt-a', key: 'A', label: 'NR-10', nextStepId: 'step-coleta-alunos' },
+          { id: 'opt-b', key: 'B', label: 'NR-35', nextStepId: 'step-coleta-alunos' },
+          { id: 'opt-c', key: 'C', label: 'CIPA', nextStepId: 'step-coleta-alunos' },
+          { id: 'opt-d', key: 'D', label: 'NR-33', nextStepId: 'step-coleta-alunos' },
+          { id: 'opt-e', key: 'E', label: 'Outros', nextStepId: 'step-humano', action: 'transfer_human' },
+        ],
+      },
+      {
+        id: 'step-documentacao',
+        title: 'Interesse em Documentação',
+        type: 'question_text',
+        message: 'Compreendo! Estar em dia com o eSocial e a legislação é vital. Fazemos a elaboração de PGR, PCMSO, LTCAT, Laudos de Insalubridade, entre outros.\n\nPor favor, digite o *CNPJ da sua empresa* ou o nome completo dela para que um de nossos engenheiros prepare um orçamento:',
+        freeTextNextStepId: 'step-coleta-tamanho-empresa'
+      },
+      {
+        id: 'step-incompany',
+        title: 'Interesse In-Company',
+        type: 'question_text',
+        message: 'Treinamentos In-Company são ótimos para adaptar a teoria à prática real dos seus funcionários.\n\nEm que cidade e bairro a sua empresa está localizada?',
+        freeTextNextStepId: 'step-coleta-alunos'
+      },
+      {
+        id: 'step-coleta-alunos',
+        title: 'Quantidade de Alunos',
+        type: 'question_text',
+        message: 'Qual seria a *quantidade estimada de colaboradores* a serem treinados?',
+        freeTextNextStepId: 'step-finalizacao'
+      },
+      {
+        id: 'step-coleta-tamanho-empresa',
+        title: 'Tamanho da Empresa',
+        type: 'question_text',
+        message: 'Aproximadamente, quantos funcionários a empresa possui hoje?',
+        freeTextNextStepId: 'step-finalizacao'
+      },
+      {
+        id: 'step-finalizacao',
+        title: 'Encerramento e Transferência',
+        type: 'closing',
+        message: 'Muito obrigado pelas informações! ✅\n\nNossa equipe técnica já está analisando sua necessidade e um de nossos especialistas em Segurança do Trabalho vai continuar o atendimento por aqui em instantes. Aguarde um minutinho!',
+        isEnd: true,
+        action: 'transfer_human'
+      },
+      {
+        id: 'step-humano',
+        title: 'Atendimento Humano',
+        type: 'closing',
+        message: 'Ok! Estou te transferindo agora mesmo para um de nossos especialistas. Aguarde um momento.',
+        isEnd: true,
+        action: 'transfer_human'
+      }
+    ]
+  }
 ];
 

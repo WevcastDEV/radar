@@ -143,8 +143,28 @@ Se vocês têm planos de modernizar a empresa, criar um sistema próprio ou auto
 https://wctech.web.app/
 
 Qual dessas frentes mais interessa para a {{nome_cliente}} no momento para prepararmos uma proposta sem compromisso?`,
-  }
-];
+    },
+    {
+      id: 'safe-tpl-6',
+      name: '👷‍♂️ Modelo 6: Nicho Seg. do Trabalho & Cursos NRs (Sites)',
+      text: `{Olá|Oi|Tudo bem?|Olá, como vai?} equipe da {{nome_cliente}}!
+
+Me chamo {{meu_nome}}, especialista em tecnologia da {{minha_empresa}}.
+
+Acompanhamos o trabalho de vocês na área de Segurança do Trabalho e treinamentos de NRs (como NR-1, NR-10, NR-35). Sabemos que transmitir credibilidade é fundamental nesse setor para fechar turmas e contratos in-company. 
+
+Desenvolvemos sites profissionais de alta conversão exclusivos para consultorias de SSMA. {Você teria|Teria} 2 minutinhos para eu te mostrar como podemos posicionar a {{nome_cliente}} com mais destaque no Google?`,
+    },
+    {
+      id: 'safe-tpl-7',
+      name: '⚙️ Modelo 7: Sistemas & Gestão para Escolas de NRs',
+      text: `{Olá|Oi|Como vai?|Olá, tudo bem?}, falo com o responsável pela gestão ou treinamentos da {{nome_cliente}}?
+
+Sou o {{meu_nome}} da {{minha_empresa}}. Desenvolvemos sistemas e automações sob medida para empresas de consultoria e cursos de NRs. 
+
+Nossas plataformas facilitam o controle de matrículas, turmas, alertas de vencimento de certificados e atendimento automatizado via WhatsApp. Vocês já utilizam um sistema próprio hoje para gerenciar os alunos ou ainda dependem de planilhas? Posso te mandar um PDF com nossas soluções?`,
+    }
+  ];
 
 const INITIAL_DEFAULT_TEMPLATES = DEFAULT_MESSAGE_TEMPLATES;
 
