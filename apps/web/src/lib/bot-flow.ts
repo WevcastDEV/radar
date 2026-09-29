@@ -119,6 +119,17 @@ export function getStoredFlows(): BotFlow[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
+        // Auto-merge novos templates que o usuário ainda não tem (como o fluxo da NR)
+        const missingDefaults = DEFAULT_BOT_FLOWS.filter(
+          (def) => !parsed.some((p: any) => p.id === def.id)
+        );
+        
+        if (missingDefaults.length > 0) {
+          const merged = [...parsed, ...missingDefaults];
+          localStorage.setItem(FLOWS_STORAGE_KEY, JSON.stringify(merged));
+          return merged;
+        }
+
         return parsed;
       }
     }
