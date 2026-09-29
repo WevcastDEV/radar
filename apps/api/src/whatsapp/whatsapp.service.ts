@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit, ForbiddenException, BadRequestException } from '@nestjs/common';
-import makeWASocket, { DisconnectReason, useMultiFileAuthState, Browsers } from '@whiskeysockets/baileys';
+import makeWASocket, { DisconnectReason, useMultiFileAuthState, Browsers, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -522,11 +522,19 @@ export class WhatsappService implements OnModuleInit {
         if (session.deviceId === 'default') this.sock = undefined;
       }
 
+      const { version, isLatest } = await fetchLatestBaileysVersion();
+      this.logger.log(`[${session.deviceId}] Usando WhatsApp Web v${version.join('.')} (Última: ${isLatest})`);
+
+      const stream = fs.createWriteStream(path.join(process.cwd(), 'baileys_debug.log'), { flags: 'a' });
+      const logger = pino({ level: 'debug' }, stream) as any;
+
       const socket = makeWASocket({
+        version,
         auth: state,
-        browser: Browsers.macOS('Desktop'),
+        browser: Browsers.ubuntu('Chrome'),
         printQRInTerminal: false, // QR disponível somente no painel autenticado
-        logger: pino({ level: 'silent' }) as any,
+        logger,
+        markOnlineOnConnect: false,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 25000,
@@ -587,7 +595,7 @@ export class WhatsappService implements OnModuleInit {
           }
 
           if (isLoggedOut) {
-            this.logger.log(`[${session.deviceId}] Sessão expirada ou deslogada pelo celular. Limpando credenciais e gerando novo QR Code limpo...`);
+            this.logger.log(`[${session.deviceId}] Sessão expirada ou deslogada. Limpando credenciais e gerando novo QR Code...`);
             session.qrCode = null;
             session.rawQrCode = null;
             this.clearAuthFolder(session.deviceId);
@@ -595,14 +603,13 @@ export class WhatsappService implements OnModuleInit {
               this.qrCode = null;
               this.rawQrCode = null;
             }
-            // AUTO-GERAÇÃO DEFINITIVA DE NOVO QR CODE
             session.reconnectTimeout = setTimeout(() => this.connectToWhatsApp(true, session.deviceId), 2500);
           } else {
-            // Se o socket fechou sem nunca ter conectado (ex: QR Code expirou após 1 minuto sem escanear):
-            // Limpa credenciais residuais expiradas para Baileys gerar um QR Code novo e válido!
-            const wasNeverConnected = !session.connectionTimestamp;
+            // NUNCA limpe a pasta aqui, pois códigos como 515 (Restart Required) acontecem logo APÓS parear
+            // e antes do open, o que causava um loop infinito de apagar a sessão válida!
+            const shouldClean = false;
             session.reconnectTimeout = setTimeout(() => {
-              this.connectToWhatsApp(wasNeverConnected, session.deviceId);
+              this.connectToWhatsApp(shouldClean, session.deviceId);
             }, 3000);
           }
         } else if (connection === 'open') {
