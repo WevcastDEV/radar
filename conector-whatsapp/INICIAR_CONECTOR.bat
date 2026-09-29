@@ -57,13 +57,14 @@ echo.
 echo   [OK] Servico WebSocket rodando na porta 3001!
 echo.
 echo   COMO CONECTAR:
-echo   1. Mantenha esta janela aberta (pode minimizar).
-echo   2. Acesse seu painel no navegador (Vercel ou Local).
-echo   3. O QR Code aparecera na tela do seu navegador!
-echo   4. Aponte a camera do seu WhatsApp e conecte.
+echo   1. O QR Code aparecera abaixo nesta janela preta e abrira no navegador!
+echo   2. Aponte a camera do seu WhatsApp (Aparelhos Conectados) e escaneie.
+echo   3. Pronto! A conexao sincronizara automaticamente com o site na nuvem.
+echo   4. Mantenha esta janela aberta minimizada enquanto usar o robo.
 echo.
 echo ===================================================================
 echo.
 cd /d "%~dp0"
+start /b "" node sync-cloud.js
 node dist/main.js
 pause
