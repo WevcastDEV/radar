@@ -15,7 +15,19 @@ export async function GET(req: NextRequest) {
         signal: AbortSignal.timeout(1500),
       });
       if (localRes.ok) {
-        return NextResponse.json(await localRes.json());
+        const localData = await localRes.json();
+        
+        // AUTO-MERGE: Se o conector local (app/api) estiver desatualizado e não tiver os novos fluxos, injetamos aqui
+        if (localData?.data?.flows && Array.isArray(localData.data.flows)) {
+          const missingDefaults = DEFAULT_BOT_FLOWS.filter(
+            (def) => !localData.data.flows.some((p: any) => p.id === def.id)
+          );
+          if (missingDefaults.length > 0) {
+            localData.data.flows = [...localData.data.flows, ...missingDefaults];
+          }
+        }
+
+        return NextResponse.json(localData);
       }
     } catch {}
 
