@@ -201,9 +201,21 @@ export default function FlowsPage() {
       const res = await safeWhatsAppClient.get('/flows');
       const data = res.data?.data;
       if (data?.flows && Array.isArray(data.flows) && data.flows.length > 0) {
-        setFlows(data.flows);
-        saveStoredFlows(data.flows);
-        const active = data.activeFlow || data.flows.find((f: BotFlow) => f.isActive) || data.flows[0];
+        let incomingFlows = data.flows;
+        
+        // AUTO-MERGE FRONTAL: Força injeção de templates novos ignorados pelo backend desatualizado
+        const storedMergedFlows = getStoredFlows(); // Já possui auto-merge com DEFAULT_BOT_FLOWS interno
+        const missingFlows = storedMergedFlows.filter(
+          (sf) => !incomingFlows.some((inc: any) => inc.id === sf.id)
+        );
+        if (missingFlows.length > 0) {
+          incomingFlows = [...incomingFlows, ...missingFlows];
+        }
+
+        setFlows(incomingFlows);
+        saveStoredFlows(incomingFlows);
+        
+        const active = data.activeFlow || incomingFlows.find((f: BotFlow) => f.isActive) || incomingFlows[0];
         if (active) {
           setActiveFlowId(active.id);
           setActiveFlowIdInStorage(active.id);
