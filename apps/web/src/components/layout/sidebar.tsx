@@ -193,37 +193,7 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Card Destacado Conector WhatsApp PC */}
-      {!collapsed ? (
-        <div className="mx-2.5 my-2 p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-950/20 shadow-xs">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Download className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400 shrink-0" />
-            <span className="text-xs font-bold text-foreground">Conector WhatsApp PC</span>
-          </div>
-          <p className="text-[10px] text-muted-foreground mb-2 leading-tight">
-            WebSocket no seu PC para conexão 24h sem desconectar.
-          </p>
-          <a
-            href="/api/whatsapp/download-conector"
-            download="radar-conector-whatsapp.zip"
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-sm transition active:scale-95 text-center cursor-pointer"
-          >
-            <Download className="w-3 h-3" />
-            <span>Baixar (.zip - 360 KB)</span>
-          </a>
-        </div>
-      ) : (
-        <div className="px-2 py-1.5 flex justify-center">
-          <a
-            href="/api/whatsapp/download-conector"
-            download="radar-conector-whatsapp.zip"
-            title="Baixar Conector WhatsApp PC (.zip)"
-            className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center hover:bg-emerald-500/25 transition cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-          </a>
-        </div>
-      )}
+
 
       {/* Footer section */}
       <div className="border-t border-border">

@@ -3806,8 +3806,8 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
               </div>
 
               {/* Lista dos Modelos Existentes com Botões de Editar */}
-              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-4 items-start">
-                <div className="space-y-3 min-w-0">
+              <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-6 items-start">
+                <div className="space-y-3 min-w-0 w-full">
                 <div className="flex flex-col gap-2">
                   <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
                     <MessageSquare className="w-4 h-4 text-emerald-400" />
@@ -3922,7 +3922,7 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                 </div>
 
                 {/* Editor Rápido do Modelo Selecionado */}
-                <div className="p-3 bg-accent/20 rounded-xl border border-border space-y-2.5">
+                <div className="p-3 bg-accent/20 rounded-xl border border-border space-y-2.5 w-full">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-bold text-muted-foreground uppercase flex items-center gap-1">
                       <Edit3 className="w-3.5 h-3.5 text-primary" /> Editando: {templates[selectedTemplateIndex]?.name}
