@@ -3806,101 +3806,102 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
               </div>
 
               {/* Lista dos Modelos Existentes com Botões de Editar */}
-              <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-6 items-start">
-                <div className="space-y-3 min-w-0 w-full">
-                <div className="flex flex-col gap-2">
-                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                    <MessageSquare className="w-4 h-4 text-emerald-400" />
-                    Modelos de Mensagem Disponíveis ({templates.length})
-                  </span>
+              {/* === PAINEL ORGANIZADO DE MODELOS === */}
+              <div className="flex flex-col gap-5 w-full items-start">
+                
+                {/* TOPO: Cabeçalho e Ações */}
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 w-full p-4 bg-accent/20 rounded-xl border border-border/70">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-sm font-black text-foreground flex items-center gap-1.5 uppercase tracking-tight">
+                      <MessageSquare className="w-4 h-4 text-emerald-400" />
+                      Meus Modelos de Mensagem ({templates.length})
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Selecione um modelo abaixo para editar ou gerenciar seus textos de envio.
+                    </span>
+                  </div>
+
                   <div className="flex flex-wrap items-center gap-2">
                     <Button 
                       variant="outline" 
                       size="sm" 
                       onClick={handleLoadSafeAntiBanTemplates}
-                      className="h-7 text-[11px] bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 px-2.5 font-bold shadow-xs flex items-center gap-1.5"
-                      title="Carregar modelos de mensagem para contatos que autorizaram a comunicação"
+                      className="h-8 text-xs bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 px-3 font-bold shadow-xs flex items-center gap-1.5"
+                      title="Carregar modelos com foco em evitar bloqueios"
                     >
-                      <Shield className="w-3 h-3 text-emerald-400" />
-                      Modelos de Mensagem
+                      <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                      Carregar Padrão Anti-Ban
                     </Button>
                     <Button 
                       variant="ghost" 
                       size="sm" 
                       onClick={handleResetToDefaultTemplates}
-                      className="h-7 text-[11px] text-muted-foreground hover:text-foreground px-2"
-                      title="Voltar aos textos padrão originais"
+                      className="h-8 text-xs text-muted-foreground hover:text-foreground px-3"
                     >
-                      <RotateCcw className="w-3 h-3 mr-1" /> Restaurar Originais
+                      <RotateCcw className="w-3.5 h-3.5 mr-1" /> Restaurar Originais
                     </Button>
-                    <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground cursor-pointer select-none">
+                    <div className="h-4 w-[1px] bg-border hidden sm:block mx-1"></div>
+                    <label className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground hover:text-foreground cursor-pointer select-none bg-background px-3 py-1.5 rounded-lg border border-border shadow-sm transition-all hover:border-primary/50">
                       <input 
                         type="checkbox" 
                         checked={rotateTemplates} 
                         onChange={(e) => setRotateTemplates(e.target.checked)}
                         className="w-3.5 h-3.5 accent-primary rounded cursor-pointer"
                       />
-                      <span className={rotateTemplates ? 'text-primary font-bold' : ''}>
-                        🔀 Alternar no Disparo
+                      <span className={rotateTemplates ? 'text-primary' : ''}>
+                        🔀 Alternar Disparo
                       </span>
                     </label>
                   </div>
                 </div>
 
-                {/* Cards de Todos os Modelos Cadastrados */}
-                <div className="grid grid-cols-1 gap-2 max-h-[30rem] overflow-y-auto pr-1 rounded-xl border border-border/70 bg-background/30 p-2">
+                {/* CENTRO: Lista/Grid de Modelos */}
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 w-full max-h-[16rem] overflow-y-auto p-1">
                   {templates.map((tpl, idx) => {
                     const isSelected = selectedTemplateIndex === idx;
                     return (
                       <div 
                         key={tpl.id}
-                          className={`p-3 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
+                        className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
                           isSelected 
-                            ? 'bg-primary/10 border-primary/60 shadow-sm' 
-                            : 'bg-accent/15 border-border hover:bg-accent/30'
+                            ? 'bg-primary/10 border-primary/60 shadow-md ring-1 ring-primary/20 scale-[1.02]' 
+                            : 'bg-accent/15 border-border hover:bg-accent/30 hover:border-border/80'
                         }`}
                       >
                         <div 
                           className="min-w-0 flex-1 cursor-pointer"
                           onClick={() => setSelectedTemplateIndex(idx)}
                         >
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 mb-1">
                             <span className={`text-xs font-bold truncate ${isSelected ? 'text-primary' : 'text-foreground'}`}>
                               {tpl.name}
                             </span>
                             {isSelected && (
-                              <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px] py-0">
-                                ✓ Ativo para Disparo
+                              <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[9px] py-0 px-1.5 uppercase font-black tracking-widest shrink-0">
+                                Editando
                               </Badge>
                             )}
                           </div>
-                          <p className="text-[11px] text-muted-foreground line-clamp-2 mt-1 font-sans leading-relaxed">
+                          <p className={`text-[11px] line-clamp-3 font-sans leading-relaxed ${isSelected ? 'text-foreground/90' : 'text-muted-foreground'}`}>
                             {tpl.text}
                           </p>
                         </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {!isSelected && (
+                        <div className="flex items-center justify-between gap-1.5 shrink-0 pt-2 border-t border-border/40">
+                          {!isSelected ? (
                             <Button
-                              variant="outline"
+                              variant="ghost"
                               size="sm"
                               onClick={() => setSelectedTemplateIndex(idx)}
-                              className="h-7 px-2 text-xs"
+                              className="h-7 px-2 text-xs font-semibold text-primary hover:bg-primary/10"
                             >
-                              Selecionar
+                              <Edit3 className="w-3 h-3 mr-1" /> Selecionar
                             </Button>
+                          ) : (
+                            <span className="text-[10px] font-bold text-emerald-500 flex items-center gap-1 px-1">
+                              <CheckCircle2 className="w-3 h-3" /> Selecionado
+                            </span>
                           )}
-
-                          {/* Botão de Edição que abre o editor com a prévia no padrão WhatsApp */}
-                          <Button
-                            size="sm"
-                            onClick={() => handleOpenEditTemplate(idx)}
-                            className="h-7 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm"
-                            title="Editar texto, título e tags deste modelo com prévia do WhatsApp"
-                          >
-                            <Edit3 className="w-3 h-3 mr-1" />
-                            Editar
-                          </Button>
 
                           {templates.length > 1 && (
                             <Button
@@ -3919,134 +3920,128 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                     );
                   })}
                 </div>
-                </div>
 
-                {/* Editor Rápido do Modelo Selecionado */}
-                <div className="p-3 bg-accent/20 rounded-xl border border-border space-y-2.5 w-full">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-muted-foreground uppercase flex items-center gap-1">
-                      <Edit3 className="w-3.5 h-3.5 text-primary" /> Editando: {templates[selectedTemplateIndex]?.name}
+                {/* INFERIOR: Editor Amplo */}
+                <div className="p-4 sm:p-5 bg-accent/10 rounded-2xl border-2 border-border shadow-inner space-y-4 w-full">
+                  <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-3">
+                    <span className="text-xs font-black text-primary uppercase flex items-center gap-1.5 tracking-wider">
+                      <Edit3 className="w-4 h-4" /> Editando Modelo Selecionado
                     </span>
                     <Button 
                       size="sm" 
                       onClick={() => handleOpenEditTemplate(selectedTemplateIndex)}
-                      className="h-6 text-[11px] bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 font-semibold px-2"
+                      className="h-7 text-[11px] bg-background hover:bg-accent text-primary border border-primary/30 font-bold px-3 shadow-sm transition-all hover:scale-105"
                     >
-                      <Smartphone className="w-3 h-3 mr-1" /> Abrir no Balão WhatsApp
+                      <Smartphone className="w-3.5 h-3.5 mr-1.5" /> Abrir no Balão WhatsApp
                     </Button>
                   </div>
 
-                  {/* Campo para renomear título */}
-                  <Input 
-                    value={templates[selectedTemplateIndex]?.name || ''} 
-                    onChange={(e) => handleTemplateNameChange(e.target.value)}
-                    placeholder="Título do Modelo..."
-                    className="h-8 text-xs font-semibold bg-background"
-                  />
+                  <div className="space-y-3">
+                    <Input 
+                      value={templates[selectedTemplateIndex]?.name || ''} 
+                      onChange={(e) => handleTemplateNameChange(e.target.value)}
+                      placeholder="Título do Modelo..."
+                      className="h-10 text-sm font-bold bg-background/50 border-border"
+                    />
 
-                  {/* Chips Rápidos de Tags */}
-                  <div className="flex flex-wrap items-center gap-1">
-                    <span className="text-[10px] text-muted-foreground mr-1 font-semibold">Inserir:</span>
-                    <button
-                      type="button"
-                      onClick={() => handleInsertTagOnPage('*{{nome_cliente}}*')}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-background hover:bg-accent border border-border font-semibold text-primary"
-                    >
-                      + *Nome Cliente*
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleInsertTagOnPage('*{{meu_nome}}*')}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-background hover:bg-accent border border-border font-semibold text-primary"
-                    >
-                      + *Meu Nome*
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleInsertTagOnPage('*{{minha_empresa}}*')}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-background hover:bg-accent border border-border font-semibold text-primary"
-                    >
-                      + *Minha Empresa*
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleInsertTagOnPage('*{{segmento}}*')}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-background hover:bg-accent border border-border font-semibold text-primary"
-                    >
-                      + *Segmento*
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleInsertTagOnPage('*{{cidade}}*')}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-background hover:bg-accent border border-border font-semibold text-primary"
-                    >
-                      + *Cidade*
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleInsertTagOnPage('*{{estado}}*')}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-background hover:bg-accent border border-border font-semibold text-primary"
-                    >
-                      + *Estado*
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleInsertSpintaxOnPage}
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 font-bold text-amber-400"
-                      title="Insere opções de saudação alternadas {Olá|Oi|Tudo bem?}"
-                    >
-                      + 🔀 Spintax Saudação
-                    </button>
-                  </div>
-
-                  {/* Textarea para edição direta */}
-                  <textarea 
-                    rows={4}
-                    className="w-full bg-background border border-border rounded-lg p-2.5 text-xs font-mono leading-relaxed focus:outline-none focus:border-primary resize-none shadow-sm"
-                    value={templates[selectedTemplateIndex]?.text || ''}
-                    onChange={(e) => handleTemplateTextChange(e.target.value)}
-                    placeholder="Digite o texto da mensagem..."
-                  />
-
-                  {/* Alerta inteligente se houver links externos no modelo */}
-                  {/https?:\/\/|www\./i.test(templates[selectedTemplateIndex]?.text || '') && (
-                    <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-300 flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
-                      <div className="space-y-0.5">
-                        <strong className="font-bold">Revise o conteúdo:</strong>
-                        <p className="text-[11px] text-amber-200/90 leading-relaxed">
-                          Esta mensagem contém um link externo. Confira o endereço e se o conteúdo corresponde ao que o contato autorizou receber.
-                        </p>
-                        <p className="text-[11px] text-amber-300 font-semibold">
-                          Inclua uma forma clara de pedir o encerramento das mensagens, como responder SAIR.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-0.5">
-                    <span className="text-[10px] text-muted-foreground">
-                      *texto* = <strong>Negrito</strong> • Salvo automaticamente
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {templates.length > 1 && (
-                        <Button 
-                          variant="ghost"
-                          size="sm" 
-                          onClick={() => handleDeleteTemplate(selectedTemplateIndex)}
-                          className="h-7 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 font-medium"
-                          title="Excluir este modelo"
-                        >
-                          <Trash2 className="w-3 h-3 mr-1" /> Remover Modelo
-                        </Button>
-                      )}
-                      <Button 
-                        size="sm" 
-                        onClick={handleExplicitSaveCurrentTemplate}
-                        className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 shadow-sm"
+                    <div className="flex flex-wrap items-center gap-1.5 bg-background p-2 rounded-lg border border-border">
+                      <span className="text-[10px] text-muted-foreground mr-1 font-bold uppercase tracking-widest">Inserir:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleInsertTagOnPage('*{{nome_cliente}}*')}
+                        className="text-[10px] px-2 py-1 rounded bg-accent hover:bg-accent/80 font-bold text-primary transition-all active:scale-95"
                       >
-                        <Save className="w-3 h-3 mr-1" /> Salvar Mensagem
-                      </Button>
+                        + *Nome Cliente*
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleInsertTagOnPage('*{{meu_nome}}*')}
+                        className="text-[10px] px-2 py-1 rounded bg-accent hover:bg-accent/80 font-bold text-primary transition-all active:scale-95"
+                      >
+                        + *Meu Nome*
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleInsertTagOnPage('*{{minha_empresa}}*')}
+                        className="text-[10px] px-2 py-1 rounded bg-accent hover:bg-accent/80 font-bold text-primary transition-all active:scale-95"
+                      >
+                        + *Minha Empresa*
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleInsertTagOnPage('*{{segmento}}*')}
+                        className="text-[10px] px-2 py-1 rounded bg-accent hover:bg-accent/80 font-bold text-primary transition-all active:scale-95"
+                      >
+                        + *Segmento*
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleInsertTagOnPage('*{{cidade}}*')}
+                        className="text-[10px] px-2 py-1 rounded bg-accent hover:bg-accent/80 font-bold text-primary transition-all active:scale-95"
+                      >
+                        + *Cidade*
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleInsertTagOnPage('*{{estado}}*')}
+                        className="text-[10px] px-2 py-1 rounded bg-accent hover:bg-accent/80 font-bold text-primary transition-all active:scale-95"
+                      >
+                        + *Estado*
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleInsertSpintaxOnPage}
+                        className="text-[10px] px-2 py-1 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 font-black text-amber-500 transition-all active:scale-95 ml-1"
+                        title="Insere opções de saudação alternadas {Olá|Oi|Tudo bem?}"
+                      >
+                        + 🔀 Spintax Saudação
+                      </button>
+                    </div>
+
+                    <textarea 
+                      rows={5}
+                      className="w-full bg-background border border-border rounded-xl p-3.5 text-sm font-mono leading-relaxed focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none shadow-inner"
+                      value={templates[selectedTemplateIndex]?.text || ''}
+                      onChange={(e) => handleTemplateTextChange(e.target.value)}
+                      placeholder="Digite o texto da mensagem..."
+                    />
+
+                    {/https?:\/\/|www\./i.test(templates[selectedTemplateIndex]?.text || '') && (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-start gap-2.5">
+                        <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
+                        <div className="space-y-1">
+                          <strong className="font-bold">Atenção com links externos:</strong>
+                          <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                            O envio de links aumenta a chance de bloqueio. Envie links apenas se o cliente autorizou. 
+                            Inclua uma forma de recusa, como: "Para parar de receber, responda SAIR".
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                        <span className="font-mono bg-accent px-1.5 py-0.5 rounded text-foreground">*texto*</span> = Negrito
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {templates.length > 1 && (
+                          <Button 
+                            variant="ghost"
+                            size="sm" 
+                            onClick={() => handleDeleteTemplate(selectedTemplateIndex)}
+                            className="h-8 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 font-bold"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Remover
+                          </Button>
+                        )}
+                        <Button 
+                          size="sm" 
+                          onClick={handleExplicitSaveCurrentTemplate}
+                          className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 shadow-md transition-all active:scale-95"
+                        >
+                          <Save className="w-3.5 h-3.5 mr-1.5" /> Salvar Mensagem
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
