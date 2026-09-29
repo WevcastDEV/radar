@@ -1,0 +1,40 @@
+module.exports = {
+  apps: [
+    {
+      name: 'radar-api',
+      cwd: './apps/api',
+      script: 'dist/main.js',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '800M',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3001,
+        DATABASE_URL: 'file:./radar.db',
+      },
+      error_file: './logs/api-error.log',
+      out_file: './logs/api-out.log',
+      merge_logs: true,
+      time: true,
+    },
+    {
+      name: 'radar-web',
+      cwd: './apps/web',
+      script: 'node_modules/next/dist/bin/next',
+      args: 'start -p 3000',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '1G',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3000,
+      },
+      error_file: './logs/web-error.log',
+      out_file: './logs/web-out.log',
+      merge_logs: true,
+      time: true,
+    },
+  ],
+};
