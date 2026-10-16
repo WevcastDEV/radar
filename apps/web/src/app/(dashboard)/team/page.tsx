@@ -5,54 +5,110 @@ import { Button } from '@/components/ui/button';
 import { Trophy, Medal, Award, Plus, UserPlus, Edit, Trash2 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 
-const getInitialTeam = () => {
-  if (typeof window !== 'undefined' && localStorage.getItem('system_reset') === 'true') return [];
-  return [
-    { id: '1', rank: 1, name: 'Carlos Santos', role: 'Vendedor Sênior', leads: 145, calls: 320, visits: 45, proposals: 28, sales: 12, conversion: 8.2, revenue: 145000, ticket: 12083, avatar: 'CS' },
-    { id: '2', rank: 2, name: 'Rafael Costa', role: 'Vendedor', leads: 120, calls: 280, visits: 38, proposals: 22, sales: 9, conversion: 7.5, revenue: 98000, ticket: 10888, avatar: 'RC' },
-    { id: '3', rank: 3, name: 'André Lima', role: 'Vendedor', leads: 95, calls: 210, visits: 30, proposals: 18, sales: 7, conversion: 7.3, revenue: 75000, ticket: 10714, avatar: 'AL' },
-    { id: '4', rank: 4, name: 'Lucas Silva', role: 'SDR', leads: 180, calls: 450, visits: 12, proposals: 8, sales: 3, conversion: 1.6, revenue: 28000, ticket: 9333, avatar: 'LS' },
-  ];
-};
+const DEFAULT_TEAM: any[] = [];
 
 export default function TeamPage() {
   const confirm = useConfirm();
-  const [team, setTeam] = useState(getInitialTeam());
+  const [team, setTeam] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('radar_team_members_v1');
+        if (saved !== null) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            // Expurgar mocks antigos
+            const clean = parsed.filter((m: any) => !['1', '2', '3', '4'].includes(m.id) && m.name !== 'Carlos Santos');
+            return clean;
+          }
+        }
+      } catch {}
+    }
+    return DEFAULT_TEAM;
+  });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<any>(null);
 
   const [newName, setNewName] = useState('');
   const [newRole, setNewRole] = useState('Vendedor');
 
+  // Carrega lista central de funcionários da API
+  const loadTeam = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/teams?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        const list = json.data !== undefined ? json.data : json;
+        if (Array.isArray(list)) {
+          setTeam(list);
+          try {
+            localStorage.setItem('radar_team_members_v1', JSON.stringify(list));
+          } catch {}
+          return;
+        }
+      }
+    } catch {}
+
+    // Fallback local se backend offline
+    try {
+      const saved = localStorage.getItem('radar_team_members_v1');
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) setTeam(parsed);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadTeam();
+  }, [loadTeam]);
+
   const chartData = team.map(t => ({
-    name: t.name.split(' ')[0],
-    Vendas: t.sales,
-    Propostas: t.proposals,
-    Visitas: t.visits,
+    name: t.name ? t.name.split(' ')[0] : 'Vendedor',
+    Vendas: t.sales || 0,
+    Propostas: t.proposals || 0,
+    Visitas: t.visits || 0,
   }));
 
-  const handleSaveMember = () => {
-    if (!newName) return toast.error('Preencha o nome do funcionário');
+  const handleSaveMember = async () => {
+    if (!newName.trim()) return toast.error('Preencha o nome do funcionário');
 
     if (editingMember) {
-      setTeam(team.map(t => t.id === editingMember.id ? { ...t, name: newName, role: newRole } : t));
+      const updated = team.map(t => t.id === editingMember.id ? { ...t, name: newName.trim(), role: newRole } : t);
+      setTeam(updated);
+      try {
+        localStorage.setItem('radar_team_members_v1', JSON.stringify(updated));
+        await fetch(`/api/teams/${editingMember.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName.trim(), role: newRole }),
+        });
+      } catch {}
       toast.success('Membro atualizado com sucesso!');
     } else {
-      const parts = newName.split(' ');
-      const avatar = parts.length > 1 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : newName.substring(0, 2).toUpperCase();
+      const parts = newName.trim().split(' ');
+      const avatar = parts.length > 1 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : newName.trim().substring(0, 2).toUpperCase();
       const newM = {
         id: Date.now().toString(),
         rank: team.length + 1,
-        name: newName,
+        name: newName.trim(),
         role: newRole,
         leads: 0, calls: 0, visits: 0, proposals: 0, sales: 0, conversion: 0, revenue: 0, ticket: 0,
         avatar
       };
-      setTeam([...team, newM]);
+      const updated = [...team, newM];
+      setTeam(updated);
+      try {
+        localStorage.setItem('radar_team_members_v1', JSON.stringify(updated));
+        await fetch('/api/teams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newM),
+        });
+      } catch {}
       toast.success('Funcionário cadastrado com sucesso!');
     }
     setIsModalOpen(false);
@@ -74,7 +130,12 @@ export default function TeamPage() {
     });
 
     if (confirmed) {
-      setTeam(team.filter(t => t.id !== id));
+      const updated = team.filter(t => t.id !== id);
+      setTeam(updated);
+      try {
+        localStorage.setItem('radar_team_members_v1', JSON.stringify(updated));
+        await fetch(`/api/teams/${id}`, { method: 'DELETE' });
+      } catch {}
       toast.success('Membro removido do sistema!');
     }
   };

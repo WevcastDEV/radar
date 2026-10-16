@@ -34,7 +34,8 @@ if not exist "%~dp0.env" (
 )
 
 if not exist "%~dp0apps\web\.env.local" (
-    echo NEXT_PUBLIC_API_URL=http://localhost:3001/api> "%~dp0apps\web\.env.local"
+    echo INTERNAL_API_URL=http://127.0.0.1:3001/api> "%~dp0apps\web\.env.local"
+    echo NEXT_PUBLIC_API_URL=/api>> "%~dp0apps\web\.env.local"
 )
 
 :: ============================================================
@@ -105,6 +106,7 @@ if "%opcao%"=="2" (
     echo   Aguarde a geracao dos arquivos atualizados...
     echo ======================================================
     echo.
+    powershell -NoProfile -Command "if (Test-Path '%~dp0apps\web\.next') { Remove-Item -Recurse -Force '%~dp0apps\web\.next' }" >nul 2>&1
     cd /d "%~dp0apps\web"
     call npm run build
     cd /d "%~dp0"
@@ -148,7 +150,7 @@ echo [1/2] Iniciando Servidor API e Robô WhatsApp (Porta 3001)...
 if "%opcao%"=="3" (
     start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor API (DEV)... && npm run start:dev"
 ) else (
-    start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor API (TURBO)... && node dist/main.js"
+    start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor API (TURBO)... && node --max-old-space-size=2048 dist/main.js"
 )
 
 if "%opcao%"=="3" (
@@ -156,7 +158,7 @@ if "%opcao%"=="3" (
     start "Radar - Painel Web" cmd /k "cd /d ""%~dp0apps\web"" && title Radar - Painel Web [DEV] && echo Iniciando Painel Web Modo Dev... && npm run dev"
 ) else (
     echo [2/2] Iniciando Painel Web em Alta Velocidade Turbo - Porta 3000...
-    start "Radar - Painel Web" cmd /k "cd /d ""%~dp0apps\web"" && title Radar - Painel Web [TURBO] && echo Iniciando Painel Web Turbo... && npm run start"
+    start "Radar - Painel Web" cmd /k "cd /d ""%~dp0apps\web"" && title Radar - Painel Web [TURBO] && echo Iniciando Painel Web Turbo... && set NODE_OPTIONS=--max-old-space-size=2048 && npm run start"
 )
 
 echo.
@@ -166,10 +168,22 @@ powershell -NoProfile -Command "$ready = $false; for ($i = 0; $i -lt 40; $i++) {
 echo Abrindo o navegador no Radar de Oportunidades...
 start http://localhost:3000/login
 
+set LOCAL_IP=
+for /f "tokens=*" %%a in ('node -e "const os=require('os');const ifaces=os.networkInterfaces();let ip='127.0.0.1';for(const k in ifaces){for(const i of ifaces[k]){if(i.family==='IPv4'&&!i.internal&&!i.address.startsWith('169.254.')){ip=i.address;break;}}if(ip!=='127.0.0.1')break;}console.log(ip);"') do set LOCAL_IP=%%a
+if "%LOCAL_IP%"=="" set LOCAL_IP=127.0.0.1
+
 echo.
 echo ===================================================================
 echo   [OK] Radar de Oportunidades PRO iniciado com sucesso!
-echo   Pressione qualquer tecla ou feche esta janela para sair.
+echo.
+echo   - ACESSO NESTE COMPUTADOR (Servidor):
+echo     http://localhost:3000
+echo.
+echo   - ACESSO EM OUTROS COMPUTADORES NA MESMA REDE:
+echo     http://%LOCAL_IP%:3000
+echo.
+echo   * Para liberar outros PCs pela primeira vez, execute:
+echo     LIBERAR_REDE_LOCAL_ADMIN.bat
 echo ===================================================================
-ping 127.0.0.1 -n 3 >nul
+ping 127.0.0.1 -n 4 >nul
 exit

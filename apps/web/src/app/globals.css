@@ -78,10 +78,199 @@
 @layer base {
   * {
     @apply border-border;
+    box-sizing: border-box;
   }
-  body {
+  html, body {
     @apply bg-background text-foreground;
+    max-width: 100vw;
+    overflow-x: hidden;
   }
+}
+
+/* ==========================================================================
+   PALETAS DE CORES PERSONALIZÁVEIS DO SISTEMA
+   ========================================================================== */
+
+/* 1. Laranja Criart (Laranja, Preto e Branco) */
+[data-color-palette="orange"] {
+  --primary: 24 95% 53%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 24 95% 53%;
+}
+[data-color-palette="orange"]:not(.dark) {
+  --accent: 24 100% 95%;
+  --accent-foreground: 24 95% 30%;
+}
+[data-color-palette="orange"].dark {
+  --primary: 24 95% 53%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 24 95% 53%;
+  --accent: 24 65% 16%;
+  --accent-foreground: 24 95% 92%;
+}
+
+/* 2. Preto e Branco / Minimalista Monocromático */
+[data-color-palette="monochrome"]:not(.dark) {
+  --primary: 0 0% 9%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 0 0% 20%;
+  --accent: 0 0% 92%;
+  --accent-foreground: 0 0% 9%;
+  --border: 0 0% 86%;
+}
+[data-color-palette="monochrome"].dark {
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+  --ring: 0 0% 80%;
+  --background: 0 0% 3%;
+  --card: 0 0% 8%;
+  --border: 0 0% 18%;
+  --accent: 0 0% 15%;
+  --accent-foreground: 0 0% 98%;
+}
+
+/* 3. Azul Corporativo */
+[data-color-palette="blue"] {
+  --primary: 215 50% 23%;
+  --primary-foreground: 210 40% 98%;
+  --ring: 215 50% 23%;
+}
+[data-color-palette="blue"].dark {
+  --primary: 213 50% 45%;
+  --primary-foreground: 210 40% 98%;
+  --ring: 213 50% 45%;
+}
+
+/* 4. Verde Esmeralda */
+[data-color-palette="emerald"] {
+  --primary: 158 64% 42%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 158 64% 42%;
+}
+[data-color-palette="emerald"].dark {
+  --primary: 158 64% 48%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 158 64% 48%;
+}
+
+/* 5. Roxo Neon */
+[data-color-palette="violet"] {
+  --primary: 262 83% 58%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 262 83% 58%;
+}
+[data-color-palette="violet"].dark {
+  --primary: 262 83% 62%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 262 83% 62%;
+}
+
+/* 6. Rosa Carmim / Pink */
+[data-color-palette="rose"] {
+  --primary: 346 84% 53%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 346 84% 53%;
+}
+[data-color-palette="rose"]:not(.dark) {
+  --accent: 346 100% 95%;
+  --accent-foreground: 346 84% 30%;
+}
+[data-color-palette="rose"].dark {
+  --primary: 346 84% 60%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 346 84% 60%;
+  --accent: 346 65% 18%;
+  --accent-foreground: 346 95% 90%;
+}
+
+/* 7. Âmbar / Ouro Premium */
+[data-color-palette="amber"] {
+  --primary: 38 92% 50%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 38 92% 50%;
+}
+[data-color-palette="amber"]:not(.dark) {
+  --accent: 38 100% 95%;
+  --accent-foreground: 38 92% 28%;
+}
+[data-color-palette="amber"].dark {
+  --primary: 38 92% 52%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 38 92% 52%;
+  --accent: 38 65% 16%;
+  --accent-foreground: 38 95% 90%;
+}
+
+/* 8. Ciano Elétrico */
+[data-color-palette="cyan"] {
+  --primary: 189 94% 43%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 189 94% 43%;
+}
+[data-color-palette="cyan"]:not(.dark) {
+  --accent: 189 100% 95%;
+  --accent-foreground: 189 94% 28%;
+}
+[data-color-palette="cyan"].dark {
+  --primary: 189 94% 48%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 189 94% 48%;
+  --accent: 189 65% 16%;
+  --accent-foreground: 189 95% 90%;
+}
+
+/* 9. Índigo Profundo */
+[data-color-palette="indigo"] {
+  --primary: 239 84% 60%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 239 84% 60%;
+}
+[data-color-palette="indigo"]:not(.dark) {
+  --accent: 239 100% 96%;
+  --accent-foreground: 239 84% 30%;
+}
+[data-color-palette="indigo"].dark {
+  --primary: 239 84% 67%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 239 84% 67%;
+  --accent: 239 65% 18%;
+  --accent-foreground: 239 95% 92%;
+}
+
+/* 10. Verde Petróleo / Teal */
+[data-color-palette="teal"] {
+  --primary: 173 80% 40%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 173 80% 40%;
+}
+[data-color-palette="teal"]:not(.dark) {
+  --accent: 173 100% 95%;
+  --accent-foreground: 173 80% 25%;
+}
+[data-color-palette="teal"].dark {
+  --primary: 173 80% 45%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 173 80% 45%;
+  --accent: 173 65% 16%;
+  --accent-foreground: 173 95% 90%;
+}
+
+/* 11. Vermelho Rubi / Ferrari */
+[data-color-palette="ruby"] {
+  --primary: 0 84% 56%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 0 84% 56%;
+}
+[data-color-palette="ruby"]:not(.dark) {
+  --accent: 0 100% 96%;
+  --accent-foreground: 0 84% 30%;
+}
+[data-color-palette="ruby"].dark {
+  --primary: 0 84% 62%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 0 84% 62%;
+  --accent: 0 65% 18%;
+  --accent-foreground: 0 95% 92%;
 }
 
 /* ===== Glass panel utility ===== */
@@ -145,20 +334,26 @@
   border-bottom-color: #111827 !important;
 }
 
-/* ===== Custom Scrollbar ===== */
+/* ===== Custom Scrollbar (Vertical Elegante & Sem Barra de Arrasto Horizontal) ===== */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 0px;
+}
+::-webkit-scrollbar:horizontal {
+  display: none !important;
+  height: 0px !important;
+  width: 0px !important;
+  background: transparent !important;
 }
 ::-webkit-scrollbar-track {
-  background: hsl(var(--background));
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted));
-  border-radius: 4px;
+  background: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.3);
+  background: hsl(var(--muted-foreground) / 0.45);
 }
 
 /* ===== Scrollbar Hide ===== */

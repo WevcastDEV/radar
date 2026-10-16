@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +10,9 @@ import {
   Search, 
   UserCheck, 
   Shield, 
+  ShieldCheck,
+  ShieldAlert,
+  Crown,
   KeyRound, 
   Edit, 
   Trash2, 
@@ -23,6 +27,7 @@ import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useAuthStore } from '@/stores/auth-store';
 import { UserProfileModal } from '@/components/user/user-profile-modal';
 import { getPersistentProfile, savePersistentProfile } from '@/lib/user-profiles';
+import { isUserAdmin, getUserRoleLabel } from '@/lib/auth';
 
 interface UserSystemItem {
   id: string;
@@ -35,11 +40,16 @@ interface UserSystemItem {
 }
 
 const INITIAL_USERS: UserSystemItem[] = [
+  { id: 'USR-00', name: 'Tom (Administrador)', email: 'tom@criart.com', role: 'Administrador', status: 'Ativo', lastLogin: 'Agora mesmo' },
   { id: 'USR-01', name: 'Weverton (Admin)', email: 'weverton@wctech.com.br', role: 'Administrador', status: 'Ativo', lastLogin: 'Agora mesmo' },
-  { id: 'USR-02', name: 'Carlos Santos', email: 'carlos@radar.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Hoje às 14:20' },
-  { id: 'USR-03', name: 'Rafael Costa', email: 'rafael@radar.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Hoje às 10:15' },
-  { id: 'USR-04', name: 'André Lima', email: 'andre@radar.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Ontem às 18:00' },
-  { id: 'USR-05', name: 'Lucas Silva', email: 'lucas@radar.com', role: 'Gestor Comercial', status: 'Ativo', lastLogin: '04/09/2026' },
+  { id: 'USR-02', name: 'Karyna', email: 'karyna@criart.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Hoje às 15:10' },
+  { id: 'USR-03', name: 'Carlos Santos', email: 'carlos@radar.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Hoje às 14:20' },
+  { id: 'USR-04', name: 'Rafael Costa', email: 'rafael@radar.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Hoje às 10:15' },
+  { id: 'USR-05', name: 'André Lima', email: 'andre@radar.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Ontem às 18:00' },
+  { id: 'USR-06', name: 'Lucas Silva', email: 'lucas@radar.com', role: 'Gestor Comercial', status: 'Ativo', lastLogin: '04/09/2026' },
+  { id: 'USR-07', name: 'Camila Rocha', email: 'camila@radar.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Ontem às 11:30' },
+  { id: 'USR-08', name: 'Fernanda Lima', email: 'fernanda@radar.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Ontem às 16:45' },
+  { id: 'USR-09', name: 'Larissa Menezes', email: 'larissa@radar.com', role: 'Vendedor', status: 'Ativo', lastLogin: 'Hoje às 09:00' },
 ];
 
 export default function UsersPage() {
@@ -52,8 +62,9 @@ export default function UsersPage() {
     if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem('radar_system_users_v1');
-        if (saved) {
-          baseList = JSON.parse(saved);
+        if (saved !== null) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) baseList = parsed;
         }
       } catch {}
     }
@@ -69,6 +80,51 @@ export default function UsersPage() {
     });
   });
 
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Carrega e sincroniza usuários da API central
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/users?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        const list = json.data !== undefined ? json.data : json;
+        if (Array.isArray(list)) {
+          const merged = list.map((u: UserSystemItem) => {
+            const p = getPersistentProfile(u.email, u.id);
+            if (!p) return u;
+            return {
+              ...u,
+              name: p.name || u.name,
+              avatar: p.avatar !== undefined ? p.avatar : u.avatar,
+            };
+          });
+          setUsers(merged);
+          try {
+            localStorage.setItem('radar_system_users_v1', JSON.stringify(merged));
+          } catch {}
+          return;
+        }
+      }
+    } catch {}
+
+    // Fallback local se a API estiver indisponível
+    try {
+      const saved = localStorage.getItem('radar_system_users_v1');
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) setUsers(parsed);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    setIsMounted(true);
+    fetchUsers();
+  }, [fetchUsers]);
+
+  const isAdmin = isUserAdmin(currentUser);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -83,14 +139,61 @@ export default function UsersPage() {
   const [formConfirmPassword, setFormConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Sync users list to localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('radar_system_users_v1', JSON.stringify(users));
-      } catch {}
+  // Conceder ou Remover Permissão de Administrador para Colaboradores
+  const handleToggleAdminPermission = async (targetUser: UserSystemItem) => {
+    const isCurrentlyAdmin = targetUser.role === 'Administrador';
+    const isSelf = currentUser?.email?.toLowerCase() === targetUser.email.toLowerCase();
+
+    if (isCurrentlyAdmin && isSelf) {
+      toast.error('Você não pode revogar sua própria permissão de administrador.');
+      return;
     }
-  }, [users]);
+
+    const newRole: UserSystemItem['role'] = isCurrentlyAdmin ? 'Vendedor' : 'Administrador';
+    const actionTitle = isCurrentlyAdmin ? 'Remover Permissão de Administrador' : 'Conceder Permissão de Administrador';
+    const actionDesc = isCurrentlyAdmin
+      ? `Tem certeza que deseja revogar o acesso de administrador de "${targetUser.name}" (${targetUser.email})? Ele passará a ser Colaborador/Vendedor sem acesso à gestão de usuários.`
+      : `Deseja conceder permissão de Administrador para "${targetUser.name}" (${targetUser.email})? Ele terá acesso total às configurações, relatórios globais e gestão de colaboradores.`;
+
+    const confirmed = await confirm({
+      title: actionTitle,
+      description: actionDesc,
+      confirmText: isCurrentlyAdmin ? 'Remover Permissão' : 'Tornar Administrador',
+      cancelText: 'Cancelar',
+      variant: isCurrentlyAdmin ? 'danger' : 'info',
+      icon: isCurrentlyAdmin ? 'alert' : 'help',
+    });
+
+    if (!confirmed) return;
+
+    const updatedList = users.map((u) => (u.id === targetUser.id ? { ...u, role: newRole } : u));
+    setUsers(updatedList);
+    try {
+      localStorage.setItem('radar_system_users_v1', JSON.stringify(updatedList));
+      await fetch(`/api/users/${targetUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+    } catch {}
+
+    if (isSelf) {
+      setCurrentUser({
+        ...currentUser,
+        role: {
+          ...currentUser.role,
+          name: newRole,
+          slug: isCurrentlyAdmin ? 'seller' : 'admin',
+        },
+      });
+    }
+
+    toast.success(
+      isCurrentlyAdmin
+        ? `Permissão de administrador removida de ${targetUser.name}.`
+        : `👑 ${targetUser.name} agora possui acesso de Administrador!`
+    );
+  };
 
   // Sync if current user profile changes
   useEffect(() => {
@@ -98,12 +201,13 @@ export default function UsersPage() {
       setUsers((prev) => {
         const exists = prev.some((u) => u.email.toLowerCase() === currentUser.email.toLowerCase());
         if (!exists) {
+          const userIsAdmin = isUserAdmin(currentUser);
           return [
             {
-              id: currentUser.id || 'USR-ADMIN',
-              name: currentUser.name || 'Administrador',
+              id: currentUser.id || (userIsAdmin ? 'USR-ADMIN' : 'USR-COLAB'),
+              name: currentUser.name || (userIsAdmin ? 'Administrador' : 'Colaborador'),
               email: currentUser.email,
-              role: 'Administrador',
+              role: userIsAdmin ? 'Administrador' : 'Vendedor',
               avatar: currentUser.avatar,
               status: 'Ativo',
               lastLogin: 'Agora mesmo',
@@ -193,12 +297,18 @@ export default function UsersPage() {
     });
 
     if (confirmed) {
-      setUsers(users.filter(u => u.id !== id));
-      toast.success('Usuário removido!');
+      const updated = users.filter(u => u.id !== id);
+      setUsers(updated);
+      try {
+        localStorage.setItem('radar_system_users_v1', JSON.stringify(updated));
+        await fetch(`/api/users/${id}`, { method: 'DELETE' });
+      } catch {}
+
+      toast.success('Usuário removido com sucesso!');
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formName.trim() || !formEmail.trim()) {
       toast.error('Informe nome e e-mail');
       return;
@@ -221,6 +331,12 @@ export default function UsersPage() {
     }
 
     if (editingUser) {
+      const isSelf = currentUser?.email?.toLowerCase() === editingUser.email.toLowerCase();
+      if (isSelf && editingUser.role === 'Administrador' && formRole !== 'Administrador') {
+        toast.error('Você não pode alterar sua própria função para remover o acesso de Administrador.');
+        return;
+      }
+
       const updatedUserObj = {
         id: editingUser.id,
         email: formEmail.trim(),
@@ -241,6 +357,19 @@ export default function UsersPage() {
           : u
       );
       setUsers(updatedList);
+      try {
+        localStorage.setItem('radar_system_users_v1', JSON.stringify(updatedList));
+        await fetch(`/api/users/${editingUser.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: formName.trim(),
+            email: formEmail.trim(),
+            role: formRole,
+            avatar: formAvatar || undefined,
+          }),
+        });
+      } catch {}
 
       // Se editou o usuário atualmente logado, sincroniza com o authStore
       if (currentUser?.email?.toLowerCase() === formEmail.trim().toLowerCase()) {
@@ -268,13 +397,57 @@ export default function UsersPage() {
         name: novo.name,
         avatar: novo.avatar,
       });
-      setUsers([...users, novo]);
+      const updatedList = [...users, novo];
+      setUsers(updatedList);
+      try {
+        localStorage.setItem('radar_system_users_v1', JSON.stringify(updatedList));
+        await fetch('/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(novo),
+        });
+      } catch {}
+
       toast.success('Novo usuário criado com sucesso!');
     }
 
     setIsModalOpen(false);
     setEditingUser(null);
   };
+
+  // Se a tela montou e o usuário logado não for Administrador, exibe aviso elegante de acesso negado
+  if (isMounted && !isAdmin) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center p-4">
+        <Card className="max-w-md w-full border-border/80 bg-card shadow-2xl p-6 text-center space-y-5 animate-in fade-in-0 duration-200">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-500 shadow-inner">
+            <Lock className="w-8 h-8" />
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="text-xl font-black text-foreground">Acesso Restrito: Apenas Administradores</h2>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              A área de gestão de usuários, senhas e concessão de permissões é restrita exclusivamente a administradores do sistema.
+            </p>
+          </div>
+          <div className="p-3.5 rounded-xl bg-accent/40 border border-border text-left space-y-1.5">
+            <p className="text-[11px] font-bold text-foreground">Sua Conta Atual:</p>
+            <p className="text-xs text-muted-foreground font-mono">{currentUser?.email || 'Colaborador não identificado'}</p>
+            <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-300 font-bold">
+              Função: {getUserRoleLabel(currentUser)}
+            </span>
+          </div>
+          <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+            <Button variant="outline" size="sm" asChild className="text-xs font-semibold cursor-pointer">
+              <Link href="/">Voltar ao Dashboard</Link>
+            </Button>
+            <Button size="sm" asChild className="text-xs font-bold bg-primary text-primary-foreground cursor-pointer">
+              <Link href="/chat-comercial">Ir para Chat Comercial</Link>
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-8">
@@ -375,6 +548,7 @@ export default function UsersPage() {
                 <th className="px-6 py-4">Cargo / Função</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Último Acesso</th>
+                <th className="px-6 py-4 text-center">Permissões de Acesso</th>
                 <th className="px-6 py-4 text-right">Ações</th>
               </tr>
             </thead>
@@ -408,9 +582,17 @@ export default function UsersPage() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <Badge variant={u.role === 'Administrador' ? 'default' : 'outline'}>
-                      {u.role}
-                    </Badge>
+                    {u.role === 'Administrador' ? (
+                      <Badge className="bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 gap-1 font-bold">
+                        <Crown className="w-3 h-3" />
+                        Administrador
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-muted-foreground gap-1">
+                        <User className="w-3 h-3" />
+                        {u.role}
+                      </Badge>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-xs px-2 py-1 rounded bg-success/10 text-success font-medium">
@@ -419,6 +601,32 @@ export default function UsersPage() {
                   </td>
                   <td className="px-6 py-4 text-muted-foreground text-xs">
                     {u.lastLogin}
+                  </td>
+                  <td className="px-6 py-4 text-center">
+                    {u.role === 'Administrador' ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={currentUser?.email?.toLowerCase() === u.email.toLowerCase()}
+                        onClick={() => handleToggleAdminPermission(u)}
+                        className="h-7 px-2.5 text-[11px] font-bold text-amber-500 hover:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 rounded-lg gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed mx-auto"
+                        title={currentUser?.email?.toLowerCase() === u.email.toLowerCase() ? 'Você não pode remover seu próprio acesso de administrador' : 'Remover permissão de Administrador'}
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        <span>Remover Admin</span>
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleToggleAdminPermission(u)}
+                        className="h-7 px-2.5 text-[11px] font-bold text-emerald-500 hover:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 rounded-lg gap-1.5 cursor-pointer mx-auto"
+                        title="Conceder acesso de Administrador"
+                      >
+                        <Crown className="w-3.5 h-3.5" />
+                        <span>Dar Permissão Admin</span>
+                      </Button>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">

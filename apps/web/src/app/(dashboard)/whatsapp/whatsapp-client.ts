@@ -53,17 +53,25 @@ export async function requestWhatsAppApi(
   const subPath = normalizeSubPath(endpoint);
   const timeoutMs = config?.timeout || 6000;
 
-  // 1. Tenta na URL configurada de API ou na máquina local do usuário (porta 3001)
+  // 1. Tenta prioritariamente a rota relativa segura do Next.js ou na máquina servidora
   if (typeof window !== 'undefined') {
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const candidateUrls: string[] = [
+      `/api/whatsapp${subPath}`, // Funciona de forma 100% transparente em qualquer PC da rede local
+    ];
+
+    if (isLocalhost) {
+      candidateUrls.push(`http://127.0.0.1:3001/api/whatsapp${subPath}`);
+    } else if (window.location.hostname) {
+      candidateUrls.push(`http://${window.location.hostname}:3001/api/whatsapp${subPath}`);
+    }
+
     const customApi = process.env.NEXT_PUBLIC_API_URL;
-    const candidateUrls: string[] = [];
     if (customApi && !customApi.startsWith('/')) {
       const cleanCustom = customApi.replace(/\/+$/, '').replace(/\/api$/, '') + '/api/whatsapp';
-      candidateUrls.push(`${cleanCustom}${subPath}`);
-    }
-    const localUrl = `http://127.0.0.1:3001/api/whatsapp${subPath}`;
-    if (!candidateUrls.includes(localUrl)) {
-      candidateUrls.push(localUrl);
+      if (!candidateUrls.includes(`${cleanCustom}${subPath}`)) {
+        candidateUrls.push(`${cleanCustom}${subPath}`);
+      }
     }
 
     for (const url of candidateUrls) {
@@ -82,7 +90,7 @@ export async function requestWhatsAppApi(
           json = { success: localRes.ok, status: localRes.status };
         }
 
-        if (localRes.ok) {
+        if (localRes.ok && json?.success !== false) {
           return { data: json };
         }
 
@@ -119,7 +127,7 @@ export async function requestWhatsAppApi(
     json = { success: false, message: `Erro de comunicação HTTP ${res.status}` };
   }
 
-  if (!res.ok) {
+  if (!res.ok || json?.success === false) {
     let errMsg = json?.message || json?.error || `Falha na requisição (HTTP ${res.status})`;
     if (Array.isArray(errMsg)) errMsg = errMsg.join(', ');
     if (typeof errMsg !== 'string') errMsg = JSON.stringify(errMsg);
@@ -136,4 +144,6 @@ export const safeWhatsAppClient = {
   get: (endpoint: string, config?: any) => requestWhatsAppApi('GET', endpoint, undefined, config),
   post: (endpoint: string, body?: any, config?: any) => requestWhatsAppApi('POST', endpoint, body, config),
   delete: (endpoint: string, config?: any) => requestWhatsAppApi('DELETE', endpoint, undefined, config),
+  put: (endpoint: string, body?: any, config?: any) => requestWhatsAppApi('PUT', endpoint, body, config),
 };
+

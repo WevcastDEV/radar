@@ -339,7 +339,11 @@ export const STORAGE_KEYS_TO_CLEAR = [
   'radar_leads',
   'radar_visits_data',
   'radar_customers_data',
+  'radar_custom_customers',
   'radar_proposals_data',
+  'radar_custom_products',
+  'radar_custom_sales',
+  'radar_sales_history',
   'radar_goals_data',
   'radar_whatsapp_dispatched_history',
   'whatsapp_dispatched_history',
@@ -349,7 +353,7 @@ export const STORAGE_KEYS_TO_CLEAR = [
 ];
 
 /**
- * Executa o reset completo e seguro de dados comerciais (leads, visitas, clientes, propostas e históricos)
+ * Executa o reset completo e seguro de dados comerciais (leads, visitas, clientes, propostas, produtos e históricos)
  */
 export function clearAllSystemData(): void {
   if (typeof window === 'undefined') return;
@@ -358,10 +362,14 @@ export function clearAllSystemData(): void {
     localStorage.removeItem(key);
   }
 
-  // Marca system_reset = true para evitar reinjeção de seeds
+  // Marca system_reset = true e zera listas
   localStorage.setItem('system_reset', 'true');
   localStorage.setItem('radar_leads_data', JSON.stringify([]));
   localStorage.setItem('radar_visits_data', JSON.stringify([]));
   localStorage.setItem('radar_customers_data', JSON.stringify([]));
+  localStorage.setItem('radar_custom_customers', JSON.stringify([]));
+  localStorage.setItem('radar_proposals_data', JSON.stringify([]));
+  localStorage.setItem('radar_custom_products', JSON.stringify([]));
+  localStorage.setItem('radar_custom_sales', JSON.stringify([]));
   localStorage.setItem('radar_whatsapp_dispatched_history', JSON.stringify([]));
 }

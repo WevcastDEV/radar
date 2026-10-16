@@ -54,6 +54,8 @@ import {
   PauseCircle,
   PlayCircle,
   Bot,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { 
   BotFlow, 
@@ -64,6 +66,8 @@ import {
   saveStoredFlows,
   getActiveFlowIdFromStorage,
   setActiveFlowIdInStorage,
+  getSelectedFlowIdFromStorage,
+  setSelectedFlowIdInStorage,
   simulateFlowStep,
   compileFlowText
 } from '@/lib/bot-flow';
@@ -80,6 +84,7 @@ import {
 import { safeWhatsAppClient } from '../whatsapp/whatsapp-client';
 import { useLeads } from '@/hooks/use-leads';
 import toast from 'react-hot-toast';
+import { ResetClientHistoryModal } from '@/components/whatsapp/reset-client-history-modal';
 
 export default function FlowsPage() {
   const { data: leads = [] } = useLeads();
@@ -90,11 +95,17 @@ export default function FlowsPage() {
   });
   const [selectedFlow, setSelectedFlow] = useState<BotFlow | null>(() => {
     const list = getStoredFlows();
+    const selId = getSelectedFlowIdFromStorage(list);
     const actId = getActiveFlowIdFromStorage(list);
-    return list.find((f) => f.id === actId) || list[0] || null;
+    return list.find((f) => f.id === selId) || list.find((f) => f.id === actId) || list[0] || null;
   });
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'knowledge' | 'conversations' | 'contacts' | 'faq' | 'editor' | 'templates' | 'trigger'>('contacts');
+
+  // Estado de sincronização e salvamento em tempo real
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved');
+  const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Estado do Banco de Contatos Classificados (Clientes vs Amigos)
   const [contacts, setContacts] = useState<ClassifiedContact[]>([]);
@@ -131,6 +142,7 @@ export default function FlowsPage() {
   const [chatReplyText, setChatReplyText] = useState('');
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [isBotPausedForChat, setIsBotPausedForChat] = useState(false);
+  const [isResetHistoryModalOpen, setIsResetHistoryModalOpen] = useState(false);
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
 
   // Filtros da aba de modelos
@@ -195,33 +207,65 @@ export default function FlowsPage() {
     }
   };
 
-  // Carrega fluxos da API com sincronização transparente
+  // Carrega fluxos da API com sincronização transparente e preservação de modificações locais
   const loadFlows = async () => {
     try {
       const res = await safeWhatsAppClient.get('/flows');
       const data = res.data?.data;
       if (data?.flows && Array.isArray(data.flows) && data.flows.length > 0) {
-        let incomingFlows = data.flows;
+        const incomingFlows = data.flows;
         
-        // AUTO-MERGE FRONTAL: Força injeção de templates novos ignorados pelo backend desatualizado
-        const storedMergedFlows = getStoredFlows(); // Já possui auto-merge com DEFAULT_BOT_FLOWS interno
-        const missingFlows = storedMergedFlows.filter(
-          (sf) => !incomingFlows.some((inc: any) => inc.id === sf.id)
-        );
-        if (missingFlows.length > 0) {
-          incomingFlows = [...incomingFlows, ...missingFlows];
+        // AUTO-MERGE FRONTAL: Preserva customizações locais mais recentes
+        const storedMergedFlows = getStoredFlows();
+        const mergedMap = new Map<string, BotFlow>();
+        
+        // 1. Inicia com o que o usuário já tem no navegador
+        for (const sf of storedMergedFlows) {
+          mergedMap.set(sf.id, sf);
         }
 
-        setFlows(incomingFlows);
-        saveStoredFlows(incomingFlows);
+        // 2. Mescla da API se for novo ou se a API tiver versão com updatedAt superior
+        for (const inc of incomingFlows) {
+          const existing = mergedMap.get(inc.id);
+          if (!existing) {
+            mergedMap.set(inc.id, inc);
+          } else {
+            const incTime = inc.updatedAt || 0;
+            const existTime = existing.updatedAt || 0;
+            if (incTime >= existTime) {
+              mergedMap.set(inc.id, { ...existing, ...inc });
+            }
+          }
+        }
+
+        const activeId = data.activeFlow?.isActive ? data.activeFlow.id : '';
+        const mergedList = Array.from(mergedMap.values()).map(flow => ({ ...flow, isActive: flow.id === activeId }));
+        setFlows(mergedList);
+        saveStoredFlows(mergedList);
         
-        const active = data.activeFlow || incomingFlows.find((f: BotFlow) => f.isActive) || incomingFlows[0];
+        const active = mergedList.find((f: BotFlow) => f.id === activeId) || null;
         if (active) {
           setActiveFlowId(active.id);
           setActiveFlowIdInStorage(active.id);
-          setSelectedFlow(active);
-          initSimulation(active);
+        } else {
+          setActiveFlowId('');
+          setActiveFlowIdInStorage('');
         }
+
+        // Preserva o fluxo que o atendente já estava editando ou o selecionado no storage
+        setSelectedFlow((current) => {
+          if (current) {
+            const fresh = mergedList.find(f => f.id === current.id);
+            return fresh || current;
+          }
+          const savedId = getSelectedFlowIdFromStorage(mergedList);
+          const matched = mergedList.find(f => f.id === savedId);
+          const chosen = matched || active || mergedList[0] || null;
+          if (chosen) {
+            initSimulation(chosen);
+          }
+          return chosen;
+        });
       }
     } catch {
       // Modo resiliente local ativo
@@ -329,11 +373,10 @@ export default function FlowsPage() {
   };
 
   const handleDeleteContact = async (id: string) => {
-    if (!confirm('Deseja remover este contato da base?')) return;
     try {
       const res = await safeWhatsAppClient.delete(`/whatsapp/contacts/${id}`);
       if (res.data?.success) {
-        toast.success('Contato removido.');
+        toast.success('Contato removido com sucesso.');
         loadClassifiedContacts();
       }
     } catch {
@@ -370,7 +413,6 @@ export default function FlowsPage() {
 
   // Limpar todo o banco de conversas
   const handleClearAllConversations = async () => {
-    if (!confirm('Deseja realmente limpar todo o histórico de conversas do banco de dados?')) return;
     try {
       await safeWhatsAppClient.delete('/conversations');
       setConversations([]);
@@ -641,58 +683,74 @@ export default function FlowsPage() {
     }
   };
 
-  // Salvar alterações do fluxo
-  const handleSaveFlow = async () => {
-    if (!selectedFlow) return;
+  // Salvar no backend de forma explícita ou em background
+  const executeSaveFlowToBackend = async (flowToSave: BotFlow, showToast: boolean = false) => {
     try {
       setSaving(true);
-      const updatedList = flows.map((f) => (f.id === selectedFlow.id ? selectedFlow : f));
-      setFlows(updatedList);
-      saveStoredFlows(updatedList);
-
-      try {
-        await safeWhatsAppClient.post('/flows', selectedFlow);
-      } catch {}
-
-      toast.success('Fluxo de conversação salvo com sucesso!');
-    } catch {
-      toast.error('Erro ao salvar o fluxo.');
+      setSaveStatus('saving');
+      await safeWhatsAppClient.post('/flows', flowToSave);
+      setSaveStatus('saved');
+      setLastSavedTime(new Date());
+      if (showToast) {
+        toast.success(`Fluxo "${flowToSave.name}" salvo com sucesso!`);
+      }
+    } catch (e: any) {
+      console.error('Erro ao salvar fluxo no servidor:', e);
+      setSaveStatus('error');
+      if (showToast) {
+        toast.error('Erro ao sincronizar com o servidor (salvo com segurança neste navegador).');
+      }
     } finally {
       setSaving(false);
     }
   };
 
-  // Ativar fluxo selecionado para o robô de WhatsApp
-  const handleActivateFlow = async (flowId: string) => {
-    try {
-      const updatedList = flows.map((f) => ({
-        ...f,
-        isActive: f.id === flowId,
-      }));
-      setFlows(updatedList);
-      saveStoredFlows(updatedList);
-      setActiveFlowId(flowId);
-      setActiveFlowIdInStorage(flowId);
+  // Atualização atômica: Atualiza selectedFlow, flows, localStorage e agenda/executa sync com API
+  const handleUpdateCurrentFlow = (updatedFlow: BotFlow, saveImmediately: boolean = false) => {
+    const withTimestamp = {
+      ...updatedFlow,
+      updatedAt: Date.now(),
+    };
+    setSelectedFlow(withTimestamp);
+    setSelectedFlowIdInStorage(withTimestamp.id);
 
-      const targetFlow = updatedList.find(f => f.id === flowId);
-      if (targetFlow) {
-        setSelectedFlow(targetFlow);
-        initSimulation(targetFlow);
+    // Atualiza lista em memória e localStorage imediatamente
+    setFlows(prev => {
+      const exists = prev.some(f => f.id === withTimestamp.id);
+      const nextList = exists
+        ? prev.map(f => f.id === withTimestamp.id ? withTimestamp : f)
+        : [withTimestamp, ...prev];
+      saveStoredFlows(nextList);
+      return nextList;
+    });
+
+    if (saveImmediately) {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
       }
-
-      try {
-        await safeWhatsAppClient.post(`/flows/${flowId}/activate`);
-      } catch {}
-
-      toast.success(`Fluxo ativado para o robô de WhatsApp!`);
-    } catch {
-      toast.error('Erro ao ativar o fluxo.');
+      executeSaveFlowToBackend(withTimestamp, true);
+    } else {
+      setSaveStatus('unsaved');
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+      autoSaveTimeoutRef.current = setTimeout(() => {
+        executeSaveFlowToBackend(withTimestamp, false);
+      }, 750);
     }
+  };
+
+  // Salvar alterações do fluxo
+  const handleSaveFlow = async () => {
+    if (!selectedFlow) return;
+    handleUpdateCurrentFlow(selectedFlow, true);
   };
 
   // Selecionar outro fluxo para edição
   const handleSelectFlow = (flow: BotFlow) => {
     setSelectedFlow(flow);
+    setSelectedFlowIdInStorage(flow.id);
     setEditingStepIndex(0);
     initSimulation(flow);
     setActiveTab('editor');
@@ -757,11 +815,13 @@ export default function FlowsPage() {
     };
 
     setFlows(prev => [newFlow, ...prev]);
+    saveStoredFlows([newFlow, ...flows]);
     setSelectedFlow(newFlow);
+    setSelectedFlowIdInStorage(newFlow.id);
     setEditingStepIndex(0);
     initSimulation(newFlow);
     setActiveTab('editor');
-    toast.success('Novo fluxo criado!');
+    executeSaveFlowToBackend(newFlow, true);
   };
 
   // Disparo para Leads
@@ -864,36 +924,6 @@ export default function FlowsPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       
-      {/* 🛡️ Banner de Blindagem contra Grupos de WhatsApp */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-blue-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-emerald-600 text-white shadow-sm shrink-0">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-900 dark:text-white">
-                Proteção de Grupos de WhatsApp: 100% Blindado
-              </span>
-              <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] px-2 py-0.5">
-                Ativo
-              </Badge>
-            </div>
-            <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-0.5">
-              O robô <strong>nunca responde</strong>, lê, interage ou dispara em grupos (<code className="text-emerald-700 dark:text-emerald-400">@g.us</code>), canais (<code className="text-emerald-700 dark:text-emerald-400">@newsletter</code>), transmissões ou status. Somente atendimentos individuais de pessoas reais.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-xs">
-            💬 Banco de Conversas Ativo
-          </Badge>
-          <Badge variant="outline" className="border-blue-500/40 text-blue-700 dark:text-blue-300 text-xs">
-            ⚙️ Configuração Manual Pronta
-          </Badge>
-        </div>
-      </div>
-
       {/* Cabeçalho Principal */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -935,20 +965,26 @@ export default function FlowsPage() {
 
           {activeTab === 'editor' && selectedFlow && (
             <>
-              {selectedFlow.id === activeFlowId ? (
-                <Badge className="bg-emerald-500 text-white font-semibold px-3 py-1.5 flex items-center gap-1.5 shadow-sm">
-                  <CheckCircle2 className="w-4 h-4" /> Fluxo Ativo no WhatsApp
-                </Badge>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleActivateFlow(selectedFlow.id)}
-                  className="border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                >
-                  <Play className="w-4 h-4 mr-1.5" /> Ativar para WhatsApp
-                </Button>
-              )}
+              {/* Indicador de Salvamento em Tempo Real */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-zinc-800 text-xs">
+                {saveStatus === 'saving' ? (
+                  <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-semibold">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando...
+                  </span>
+                ) : saveStatus === 'saved' ? (
+                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Salvo {lastSavedTime ? `(às ${lastSavedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-slate-500 font-medium">
+                    <Clock className="w-3.5 h-3.5" /> Gravando...
+                  </span>
+                )}
+              </div>
+
+              <a href="/chat-comercial" className="text-xs font-medium text-emerald-600 hover:underline">
+                Ative o robô no Chat Comercial
+              </a>
 
               <Button
                 size="sm"
@@ -1489,11 +1525,12 @@ export default function FlowsPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={handleClearAllConversations}
-                className="text-xs h-9 border-rose-500/30 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                onClick={() => setIsResetHistoryModalOpen(true)}
+                className="text-xs h-9 border-rose-500/30 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 font-semibold"
+                title="Resetar histórico completo de clientes para entrega do sistema à empresa"
               >
                 <Trash2 className="w-3.5 h-3.5 mr-1" />
-                Limpar
+                Resetar Histórico (Entrega)
               </Button>
             </div>
           </div>
@@ -2264,19 +2301,7 @@ export default function FlowsPage() {
                       >
                         <Edit3 className="w-3.5 h-3.5 mr-1" /> Editar & Testar
                       </Button>
-                      {flow.id !== activeFlowId && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-xs border-emerald-500/40 text-emerald-600 hover:bg-emerald-50"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleActivateFlow(flow.id);
-                          }}
-                        >
-                          Ativar
-                        </Button>
-                      )}
+
                     </div>
                   </CardContent>
                 </Card>
@@ -2313,7 +2338,7 @@ export default function FlowsPage() {
                     </label>
                     <Input
                       value={selectedFlow.companyName}
-                      onChange={e => setSelectedFlow({ ...selectedFlow, companyName: e.target.value })}
+                      onChange={e => handleUpdateCurrentFlow({ ...selectedFlow, companyName: e.target.value })}
                       className="mt-1 text-xs"
                       placeholder="Ex: Minha Clínica / Minha Loja"
                     />
@@ -2325,7 +2350,7 @@ export default function FlowsPage() {
                     </label>
                     <Input
                       value={selectedFlow.segment}
-                      onChange={e => setSelectedFlow({ ...selectedFlow, segment: e.target.value })}
+                      onChange={e => handleUpdateCurrentFlow({ ...selectedFlow, segment: e.target.value })}
                       className="mt-1 text-xs"
                       placeholder="Ex: Clínicas & Saúde"
                     />
@@ -2338,9 +2363,23 @@ export default function FlowsPage() {
                   </label>
                   <Input
                     value={selectedFlow.name}
-                    onChange={e => setSelectedFlow({ ...selectedFlow, name: e.target.value })}
+                    onChange={e => handleUpdateCurrentFlow({ ...selectedFlow, name: e.target.value })}
                     className="mt-1 text-xs"
                   />
+                </div>
+
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-zinc-800">
+                  <span className="text-[11px] text-slate-400">
+                    {saveStatus === 'saving' ? 'Salvando dados...' : 'Modificações salvas automaticamente'}
+                  </span>
+                  <Button
+                    size="sm"
+                    onClick={handleSaveFlow}
+                    disabled={saving}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs h-8"
+                  >
+                    <Save className="w-3.5 h-3.5 mr-1" /> Salvar Dados do Fluxo
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -2476,20 +2515,31 @@ export default function FlowsPage() {
                       </CardDescription>
                     </div>
 
-                    {selectedFlow.steps.length > 1 && (
+                    <div className="flex items-center gap-2">
                       <Button
                         size="sm"
-                        variant="ghost"
-                        className="text-rose-500 hover:text-rose-600 h-8 text-xs"
-                        onClick={() => {
-                          const updated = selectedFlow.steps.filter((_, i) => i !== editingStepIndex);
-                          setSelectedFlow({ ...selectedFlow, steps: updated });
-                          setEditingStepIndex(Math.max(0, editingStepIndex - 1));
-                        }}
+                        onClick={handleSaveFlow}
+                        disabled={saving}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs font-semibold shadow-xs"
                       >
-                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Excluir Etapa
+                        <Save className="w-3.5 h-3.5 mr-1" /> Salvar Etapa
                       </Button>
-                    )}
+
+                      {selectedFlow.steps.length > 1 && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-rose-500 hover:text-rose-600 h-8 text-xs"
+                          onClick={() => {
+                            const updated = selectedFlow.steps.filter((_, i) => i !== editingStepIndex);
+                            handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
+                            setEditingStepIndex(Math.max(0, editingStepIndex - 1));
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 mr-1" /> Excluir Etapa
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </CardHeader>
 
@@ -2504,7 +2554,7 @@ export default function FlowsPage() {
                         onChange={e => {
                           const updated = [...selectedFlow.steps];
                           updated[editingStepIndex].title = e.target.value;
-                          setSelectedFlow({ ...selectedFlow, steps: updated });
+                          handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                         }}
                         className="mt-1 text-xs"
                         placeholder="Ex: Pergunta de Horário"
@@ -2520,7 +2570,7 @@ export default function FlowsPage() {
                         onChange={e => {
                           const updated = [...selectedFlow.steps];
                           updated[editingStepIndex].type = e.target.value as any;
-                          setSelectedFlow({ ...selectedFlow, steps: updated });
+                          handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                         }}
                         className="w-full mt-1 h-9 text-xs rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 font-medium"
                       >
@@ -2541,7 +2591,7 @@ export default function FlowsPage() {
                       onChange={e => {
                         const updated = [...selectedFlow.steps];
                         updated[editingStepIndex].message = e.target.value;
-                        setSelectedFlow({ ...selectedFlow, steps: updated });
+                        handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                       }}
                       className="w-full mt-1 text-xs p-3 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 font-sans leading-relaxed"
                       placeholder="Digite a mensagem que o robô enviará..."
@@ -2551,12 +2601,12 @@ export default function FlowsPage() {
                       <code className="bg-slate-100 dark:bg-zinc-800 px-1 py-0.5 rounded cursor-pointer hover:bg-slate-200" onClick={() => {
                         const updated = [...selectedFlow.steps];
                         updated[editingStepIndex].message += ' {{nome_cliente}}';
-                        setSelectedFlow({ ...selectedFlow, steps: updated });
+                        handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                       }}>{'{{nome_cliente}}'}</code>
                       <code className="bg-slate-100 dark:bg-zinc-800 px-1 py-0.5 rounded cursor-pointer hover:bg-slate-200" onClick={() => {
                         const updated = [...selectedFlow.steps];
                         updated[editingStepIndex].message += ' {{minha_empresa}}';
-                        setSelectedFlow({ ...selectedFlow, steps: updated });
+                        handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                       }}>{'{{minha_empresa}}'}</code>
                     </div>
                   </div>
@@ -2583,7 +2633,7 @@ export default function FlowsPage() {
                               action: 'none',
                             });
                             updated[editingStepIndex].options = currentOptions;
-                            setSelectedFlow({ ...selectedFlow, steps: updated });
+                            handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                           }}
                           className="h-7 text-xs"
                         >
@@ -2603,7 +2653,7 @@ export default function FlowsPage() {
                                 onChange={e => {
                                   const updated = [...selectedFlow.steps];
                                   updated[editingStepIndex].options![oIdx].label = e.target.value;
-                                  setSelectedFlow({ ...selectedFlow, steps: updated });
+                                  handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                                 }}
                                 className="h-8 text-xs font-medium"
                                 placeholder="Rótulo da opção (ex: Agendar Horário)"
@@ -2615,7 +2665,7 @@ export default function FlowsPage() {
                                 onChange={e => {
                                   const updated = [...selectedFlow.steps];
                                   updated[editingStepIndex].options![oIdx].nextStepId = e.target.value;
-                                  setSelectedFlow({ ...selectedFlow, steps: updated });
+                                  handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                                 }}
                                 className="w-full h-8 text-xs rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2"
                               >
@@ -2634,7 +2684,7 @@ export default function FlowsPage() {
                               onClick={() => {
                                 const updated = [...selectedFlow.steps];
                                 updated[editingStepIndex].options = updated[editingStepIndex].options?.filter((_, i) => i !== oIdx);
-                                setSelectedFlow({ ...selectedFlow, steps: updated });
+                                handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                               }}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -2657,7 +2707,7 @@ export default function FlowsPage() {
                           onChange={e => {
                             const updated = [...selectedFlow.steps];
                             updated[editingStepIndex].freeTextNextStepId = e.target.value;
-                            setSelectedFlow({ ...selectedFlow, steps: updated });
+                            handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                           }}
                           className="w-full mt-1 h-9 text-xs rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2"
                         >
@@ -2679,7 +2729,7 @@ export default function FlowsPage() {
                           onChange={e => {
                             const updated = [...selectedFlow.steps];
                             updated[editingStepIndex].saveToField = e.target.value;
-                            setSelectedFlow({ ...selectedFlow, steps: updated });
+                            handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                           }}
                           className="mt-1 h-9 text-xs"
                           placeholder="Ex: nome_paciente, necessidade"
@@ -2700,7 +2750,7 @@ export default function FlowsPage() {
                       onChange={e => {
                         const updated = [...selectedFlow.steps];
                         updated[editingStepIndex].action = e.target.value as any;
-                        setSelectedFlow({ ...selectedFlow, steps: updated });
+                        handleUpdateCurrentFlow({ ...selectedFlow, steps: updated });
                       }}
                       className="h-8 text-xs rounded-md border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 font-medium"
                     >
@@ -2709,6 +2759,34 @@ export default function FlowsPage() {
                       <option value="transfer_human">🤝 Transferir para Atendente Humano</option>
                       <option value="mark_hot">⭐ Marcar como Lead Quente</option>
                     </select>
+                  </div>
+
+                  {/* Barra Inferior de Confirmação & Salvamento em Tempo Real */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/70 dark:bg-zinc-900/60 p-3 rounded-xl mt-3">
+                    <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-400">
+                      {saveStatus === 'saving' ? (
+                        <span className="flex items-center gap-1.5 text-amber-500 font-semibold">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Salvando alterações no servidor...
+                        </span>
+                      ) : saveStatus === 'saved' ? (
+                        <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                          <CheckCircle2 className="w-4 h-4" /> Todas as alterações estão salvas e seguras
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-slate-600 dark:text-zinc-300">
+                          <Clock className="w-4 h-4" /> Salvamento automático ativo em tempo real
+                        </span>
+                      )}
+                    </div>
+
+                    <Button
+                      size="sm"
+                      onClick={handleSaveFlow}
+                      disabled={saving}
+                      className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 px-5 h-9"
+                    >
+                      <Save className="w-4 h-4 mr-1.5" /> Salvar Alterações do Fluxo
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -3143,6 +3221,19 @@ export default function FlowsPage() {
           </div>
         </div>
       )}
+
+      {/* Modal de Reset para Nova Empresa */}
+      <ResetClientHistoryModal
+        isOpen={isResetHistoryModalOpen}
+        onClose={() => setIsResetHistoryModalOpen(false)}
+        onSuccess={() => {
+          setConversations([]);
+          setSelectedConversation(null);
+          setConvStats({ totalConversations: 0, totalMessages: 0, hotLeadsCount: 0, intentsRanking: {} });
+          loadConversations();
+          loadClassifiedContacts();
+        }}
+      />
     </div>
   );
 }

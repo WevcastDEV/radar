@@ -65,6 +65,8 @@ data/
 **/data/*.json
 scratch/
 *.tsbuildinfo
+*.bak
+*.asar
 
 # Python
 __pycache__/

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Utilitarios de Tratamento, Normalizacao e Formatacao de Telefones Brasileiros.
  * 
  * Regras:
@@ -17,6 +17,25 @@ export function cleanPhoneDigits(raw: string | undefined | null): string {
 }
 
 /**
+ * Mapeamento de identificadores de privacidade Baileys (LID) para telefones reais
+ */
+export const KNOWN_LID_MAP: Record<string, string> = {
+  '156113521655850': '559292306070',
+  '178576250958037': '5592986108059',
+  '217295800516815': '5597984332129',
+  '26655322026119': '5592981087241',
+};
+
+export function resolveLidToPhone(raw: string | undefined | null): string {
+  if (!raw) return '';
+  const digits = cleanPhoneDigits(raw);
+  if (KNOWN_LID_MAP[digits]) {
+    return KNOWN_LID_MAP[digits];
+  }
+  return raw;
+}
+
+/**
  * Normaliza qualquer formato de telefone brasileiro para os digitos nacionais (DDD + Numero),
  * removendo com seguranca o DDI 55 do inicio.
  * 
@@ -28,6 +47,11 @@ export function extractBrazilianNationalDigits(raw: string | undefined | null, f
   if (!raw) return '';
   let digits = cleanPhoneDigits(raw);
   if (!digits) return '';
+
+  // Se for um LID conhecido do WhatsApp Baileys, traduz para o telefone real
+  if (KNOWN_LID_MAP[digits]) {
+    digits = cleanPhoneDigits(KNOWN_LID_MAP[digits]);
+  }
 
   // Remove repeticoes acidentais de 55 no inicio (ex: 5555...)
   while (digits.startsWith('5555') && digits.length >= 14) {

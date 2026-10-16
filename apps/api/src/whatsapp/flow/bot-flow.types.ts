@@ -54,4 +54,6 @@ export interface UserFlowSession {
   collectedData: Record<string, string>;
   lastInteractionAt: number;
   history: Array<{ sender: 'bot' | 'user'; text: string; timestamp: number }>;
+  fallbackPromptCount?: number;
 }
+

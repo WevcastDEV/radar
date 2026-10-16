@@ -42,13 +42,7 @@ interface VisitItem {
   checkInCoords?: { lat: number; lng: number };
 }
 
-const DEFAULT_INITIAL_VISITS: VisitItem[] = [
-  { id: '1', date: 'Hoje', time: '10:00', client: 'Panificadora Conde do Pão', address: 'Rua Salvador, 450 - Adrianópolis, Manaus', seller: 'Carlos Santos', phone: '(92) 3642-1200', status: 'Realizada', statusColor: 'success', checkedInAt: '10:05 (GPS Validado)', checkInCoords: { lat: -3.1040, lng: -60.0150 } },
-  { id: '2', date: 'Hoje', time: '14:30', client: 'Petz Ponta Negra Express', address: 'Av. Coronel Teixeira, 5000 - Ponta Negra, Manaus', seller: 'Carlos Santos', phone: '(92) 3658-9900', status: 'Confirmada', statusColor: 'primary' },
-  { id: '3', date: 'Hoje', time: '16:30', client: 'Barbearia Dom Pedro Manaus', address: 'Av. Pedro Teixeira, 1200 - Dom Pedro, Manaus', seller: 'Rafael Costa', phone: '(92) 98122-3344', status: 'Agendada', statusColor: 'warning' },
-  { id: '4', date: 'Amanhã', time: '09:30', client: 'Drogaria Santo Remédio Adrianópolis', address: 'Av. Jornalista Umberto Calderaro, 800 - Adrianópolis, Manaus', seller: 'André Lima', phone: '(92) 3215-5000', status: 'Agendada', statusColor: 'warning' },
-  { id: '5', date: 'Amanhã', time: '14:00', client: 'Supermercado DB Paraíba', address: 'Av. Álvaro Maia, 1000 - Centro/Adrianópolis, Manaus', seller: 'Carlos Santos', phone: '(92) 3622-7700', status: 'Agendada', statusColor: 'warning' },
-];
+const DEFAULT_INITIAL_VISITS: VisitItem[] = [];
 
 function VisitsContent() {
   const confirm = useConfirm();
@@ -149,6 +143,24 @@ function VisitsContent() {
     }
   };
 
+  const handleClearAllVisitsOnly = async () => {
+    const confirmed = await confirm({
+      title: 'Limpar Todas as Visitas Agendadas',
+      description: 'Deseja remover todas as visitas agendadas? Sua agenda ficará 100% zerada.',
+      confirmText: 'Sim, Limpar Visitas',
+      cancelText: 'Cancelar',
+      variant: 'danger',
+      icon: 'trash',
+    });
+
+    if (confirmed) {
+      saveVisitsToStorage([]);
+      setVisits([]);
+      setSelectedVisit(null);
+      toast.success('Todas as visitas foram removidas com sucesso!');
+    }
+  };
+
   const handleClearAllVisitsAndData = async () => {
     const confirmed = await confirm({
       title: 'Limpar Todas as Informações do Sistema',
@@ -170,32 +182,32 @@ function VisitsContent() {
     }
   };
 
-  // Load from localStorage on mount
+  // Load from localStorage on mount - ZERO exemplos pré-carregados
   useEffect(() => {
     try {
-      if (localStorage.getItem('system_reset') === 'true') {
-        const raw = localStorage.getItem(VISITS_STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            setVisits(parsed);
-            return;
-          }
-        }
-        setVisits([]);
-        return;
-      }
-
       const raw = localStorage.getItem(VISITS_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setVisits(parsed);
+        if (Array.isArray(parsed)) {
+          // Remove quaisquer exemplos antigos padrão se existirem
+          const mockClients = [
+            'Panificadora Conde do Pão',
+            'Petz Ponta Negra Express',
+            'Barbearia Dom Pedro Manaus',
+            'Drogaria Santo Remédio Adrianópolis',
+            'Supermercado DB Paraíba'
+          ];
+          const cleanList = parsed.filter(v => 
+            !['1', '2', '3', '4', '5'].includes(v.id) &&
+            !mockClients.includes(v.client)
+          );
+          setVisits(cleanList);
+          localStorage.setItem(VISITS_STORAGE_KEY, JSON.stringify(cleanList));
           return;
         }
       }
-      setVisits(DEFAULT_INITIAL_VISITS);
-      localStorage.setItem(VISITS_STORAGE_KEY, JSON.stringify(DEFAULT_INITIAL_VISITS));
+      setVisits([]);
+      localStorage.setItem(VISITS_STORAGE_KEY, JSON.stringify([]));
     } catch (e) {
       setVisits([]);
     }
@@ -394,15 +406,17 @@ function VisitsContent() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button 
-            variant="outline" 
-            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive text-sm"
-            onClick={handleClearAllVisitsAndData}
-            title="Limpar todos os dados, visitas, leads e clientes do sistema"
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Limpar Tudo
-          </Button>
+          {visits.length > 0 && (
+            <Button 
+              variant="outline" 
+              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive text-sm"
+              onClick={handleClearAllVisitsOnly}
+              title="Limpar todas as visitas agendadas"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Limpar Visitas
+            </Button>
+          )}
           <Button onClick={handleOpenNewVisit} className="font-semibold shadow-sm">
             <Plus className="w-4 h-4 mr-2" />
             Agendar Nova Visita
@@ -451,11 +465,20 @@ function VisitsContent() {
       {/* Visits List */}
       <div className="space-y-8">
         {Object.keys(groupedVisits).length === 0 ? (
-          <div className="p-12 text-center bg-card rounded-xl border border-border">
-            <CalendarIcon className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
-            <h3 className="font-bold text-foreground mb-1">Nenhuma visita encontrada</h3>
-            <p className="text-xs text-muted-foreground mb-4">Não há visitas para os filtros selecionados.</p>
-            <Button onClick={() => setIsModalOpen(true)}>Agendar Visita</Button>
+          <div className="p-12 text-center bg-card rounded-2xl border border-dashed border-border max-w-lg mx-auto">
+            <CalendarIcon className="w-12 h-12 mx-auto text-primary/40 mb-3" />
+            <h3 className="font-bold text-foreground text-base mb-1">
+              {visits.length === 0 ? 'Nenhuma visita agendada' : 'Nenhuma visita encontrada'}
+            </h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              {visits.length === 0 
+                ? 'Sua agenda de visitas está 100% limpa e pronta para novos compromissos presenciais.' 
+                : 'Não há visitas para os filtros selecionados.'}
+            </p>
+            <Button onClick={handleOpenNewVisit} className="text-xs font-bold shadow-sm">
+              <Plus className="w-4 h-4 mr-1.5" />
+              Agendar Nova Visita
+            </Button>
           </div>
         ) : (
           Object.entries(groupedVisits).map(([date, items]) => (

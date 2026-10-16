@@ -21,6 +21,12 @@ const PRESET_USERS: Record<string, { id: string; email: string; name: string; ro
     name: 'Carlos Silva',
     role: { name: 'Vendedor' },
   },
+  'tom@criart.com': {
+    id: 'user-tom-admin',
+    email: 'tom@criart.com',
+    name: 'Tom',
+    role: { name: 'Admin' },
+  },
 };
 
 export async function POST(req: NextRequest) {

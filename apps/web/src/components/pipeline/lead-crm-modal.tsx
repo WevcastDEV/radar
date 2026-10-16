@@ -25,7 +25,8 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  MessageSquare
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Link from 'next/link';
@@ -79,9 +80,11 @@ export function LeadCrmModal({ lead, isOpen, onClose }: LeadCrmModalProps) {
   const cleanDigits = toWhatsAppJidDigits(rawPhone);
   const firstName = (form.contactName || form.name).split(' ')[0];
   const defaultWhatsAppMessage = encodeURIComponent(
-    `Olá ${firstName}! Tudo bem?\n\nAqui é o Weverton da WCTech. Estou entrando em contato sobre a proposta e soluções para a ${form.name}.\n\nPodemos conversar um instante?`
+    `Olá ${firstName}! Tudo bem?\n\nEstou entrando em contato sobre as propostas e soluções para a ${form.name}.\n\nPodemos conversar um instante?`
   );
-  const whatsappUrl = cleanDigits ? `https://wa.me/${cleanDigits}?text=${defaultWhatsAppMessage}` : null;
+  const chatComercialUrl = cleanDigits 
+    ? `/chat-comercial?phone=${cleanDigits}&name=${encodeURIComponent(form.name)}&text=${defaultWhatsAppMessage}` 
+    : null;
 
   const handleSave = () => {
     if (!form.name.trim()) {
@@ -128,15 +131,13 @@ export function LeadCrmModal({ lead, isOpen, onClose }: LeadCrmModalProps) {
         className="relative w-full max-w-2xl bg-card border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header com indicador de score e estágio */}
+        {/* Header com indicador de oportunidade e estágio */}
         <div className="p-4 sm:p-5 border-b border-border bg-accent/20 flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 min-w-0">
             <div 
-              className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shrink-0 border shadow-sm"
-              style={{ borderColor: scoreColor, color: scoreColor, backgroundColor: `${scoreColor}15` }}
-              title={`Score: ${scoreTotal} pts`}
+              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border shadow-sm bg-primary/10 border-primary/20 text-primary"
             >
-              {scoreTotal}
+              <Building className="w-5 h-5" />
             </div>
 
             <div className="min-w-0">
@@ -197,24 +198,8 @@ export function LeadCrmModal({ lead, isOpen, onClose }: LeadCrmModalProps) {
             </div>
           </div>
 
-          {/* Dados Financeiros e de Contato */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground mb-1 block">
-                Valor da Venda / Proposta (R$)
-              </label>
-              <div className="relative">
-                <span className="absolute left-3 top-2.5 text-xs text-muted-foreground font-mono">R$</span>
-                <Input
-                  type="number"
-                  value={form.potentialValue}
-                  onChange={(e) => setForm({ ...form, potentialValue: Number(e.target.value) || 0 })}
-                  className="pl-9 h-9 text-xs font-mono font-bold bg-background"
-                  placeholder="2500"
-                />
-              </div>
-            </div>
-
+          {/* Dados de Prioridade e de Contato */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-muted-foreground mb-1 block">
                 Prioridade da Oportunidade
@@ -260,16 +245,15 @@ export function LeadCrmModal({ lead, isOpen, onClose }: LeadCrmModalProps) {
             </div>
 
             <div>
-              {whatsappUrl ? (
-                <a
-                  href={whatsappUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full h-9 px-3 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow transition"
+              {chatComercialUrl ? (
+                <Link
+                  href={chatComercialUrl}
+                  onClick={onClose}
+                  className="w-full h-9 px-3 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 shadow transition cursor-pointer"
                 >
-                  <Phone className="w-3.5 h-3.5" />
-                  <span>Conversar no WhatsApp Agora</span>
-                </a>
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Conversar no Chat Comercial</span>
+                </Link>
               ) : (
                 <Button disabled className="w-full h-9 text-xs opacity-50">
                   Sem telefone cadastrado
@@ -299,7 +283,13 @@ export function LeadCrmModal({ lead, isOpen, onClose }: LeadCrmModalProps) {
           {/* Atalhos Rápidos para Proposta e Visita */}
           <div className="p-3 rounded-xl bg-secondary/50 border border-border flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground font-medium">Ações Comerciais Rápidas:</span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Link href={`/chat-comercial?phone=${cleanDigits || (lead.phone ? lead.phone.replace(/\D/g, '') : lead.id)}`}>
+                <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 font-bold">
+                  <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                  Abrir no Chat Comercial
+                </Button>
+              </Link>
               <Link href={`/proposals?leadId=${lead.id}`}>
                 <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 border-border bg-card">
                   <FileText className="w-3.5 h-3.5 text-blue-400" />

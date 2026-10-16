@@ -47,23 +47,34 @@ echo Liberando portas 3000 e 3001 caso estejam em uso...
 powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 3000, 3001 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } catch {} }" >nul 2>&1
 
 echo [1/3] Iniciando Servidor Backend e Robo do WhatsApp (Banco SQLite Local)...
-start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor e WhatsApp... && node dist/main.js"
+start "Radar - API e WhatsApp" cmd /k "cd /d ""%~dp0apps\api"" && title Radar - API e WhatsApp && echo Iniciando Servidor e WhatsApp... && node --max-old-space-size=2048 dist/main.js"
 echo       OK - Terminal do WhatsApp aberto!
 
+if not exist "%~dp0apps\web\.next\BUILD_ID" (
+    echo       [!] Compilacao nao encontrada. Gerando build do Painel Web...
+    cd /d "%~dp0apps\web"
+    call npm run build
+    cd /d "%~dp0"
+)
+
 echo [2/3] Iniciando Painel Web Otimizado (Modo Turbo)...
-start "Radar - Painel Web" cmd /k "cd /d ""%~dp0apps\web"" && title Radar - Painel Web && echo Iniciando Painel Web... && npm run start"
+start "Radar - Painel Web" cmd /k "cd /d ""%~dp0apps\web"" && title Radar - Painel Web && echo Iniciando Painel Web... && set NODE_OPTIONS=--max-old-space-size=2048 && npm run start"
 echo       OK - Terminal do Painel Web aberto!
 
 echo [3/3] Aguardando inicializacao completa dos servidores (API e Painel Web)...
 powershell -NoProfile -Command "$ready = $false; for ($i = 0; $i -lt 40; $i++) { try { $r1 = (Invoke-WebRequest -Uri 'http://localhost:3000/login' -UseBasicParsing -TimeoutSec 1).StatusCode; $r2 = (Invoke-WebRequest -Uri 'http://localhost:3001/api/health' -UseBasicParsing -TimeoutSec 1).StatusCode; if ($r1 -eq 200 -and $r2 -eq 200) { $ready = $true; break } } catch {}; Start-Sleep -Milliseconds 700 }; if ($ready) { Write-Host '      [OK] Servidores 100% prontos e conectados!' -ForegroundColor Green } else { Write-Host '      [!] Abrindo navegador...' -ForegroundColor Yellow }"
 
+set LOCAL_IP=
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "((Get-NetIPAddress -AddressFamily IPv4) | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254*' }).IPAddress | Select-Object -First 1"') do set LOCAL_IP=%%a
+if "%LOCAL_IP%"=="" set LOCAL_IP=127.0.0.1
+
 echo ======================================================
 echo   SISTEMA INICIADO COM SUCESSO!
 echo ======================================================
 echo.
-echo   Painel Web:      http://localhost:3000
-echo   Conectar Whats:  http://localhost:3000/settings
-echo   API Backend:     http://localhost:3001/api
+echo   Neste computador:      http://localhost:3000
+echo   Outros computadores:   http://%LOCAL_IP%:3000
+echo   Conectar WhatsApp:     http://localhost:3000/settings
 echo.
 echo Abrindo o navegador automaticamente...
 start http://localhost:3000

@@ -45,53 +45,18 @@ export function calculateLeadScore(lead: Partial<LeadListItem> & { phone?: strin
   return { total: finalTotal, level, factors };
 }
 
-// Initial default seed for MANAUS - AM
-const generateInitialLeads = (): LeadListItem[] => {
-  const seedNames = [
-    { name: 'Panificadora Conde do Pão', cat: 'Padaria', neighborhood: 'Adrianópolis', city: 'Manaus', state: 'AM', lat: -3.1040, lng: -60.0150, phone: '(92) 99142-1200' },
-    { name: 'Petz Ponta Negra Express', cat: 'Pet Shop', neighborhood: 'Ponta Negra', city: 'Manaus', state: 'AM', lat: -3.0760, lng: -60.0820, phone: '(92) 98158-9900' },
-    { name: 'Barbearia Dom Pedro Manaus', cat: 'Barbearia', neighborhood: 'Dom Pedro', city: 'Manaus', state: 'AM', lat: -3.0980, lng: -60.0450, phone: '(92) 98122-3344' },
-    { name: 'Drogaria Santo Remédio Adrianópolis', cat: 'Farmácia', neighborhood: 'Adrianópolis', city: 'Manaus', state: 'AM', lat: -3.1120, lng: -60.0130, phone: '(92) 99215-5000' },
-    { name: 'Supermercado DB Paraíba', cat: 'Supermercado', neighborhood: 'Adrianópolis', city: 'Manaus', state: 'AM', lat: -3.1180, lng: -60.0210, phone: '(92) 99322-7700' },
-    { name: 'Restaurante Banzeiro Gastronomia', cat: 'Restaurante', neighborhood: 'Nossa Sra. das Graças', city: 'Manaus', state: 'AM', lat: -3.1145, lng: -60.0220, phone: '(92) 98234-1621' },
-    { name: 'Academia Live Fitness Vieiralves', cat: 'Academia', neighborhood: 'Vieiralves', city: 'Manaus', state: 'AM', lat: -3.1090, lng: -60.0180, phone: '(92) 99188-4455' },
-  ];
+// Zero default seeds on fresh install
+const generateInitialLeads = (): LeadListItem[] => [];
 
-  return seedNames.map((s, i) => {
-    const catInfo = detectCategory(s.name, [s.cat], s.city);
-    return {
-      id: `lead-manaus-${i + 1}`,
-      name: s.name,
-      tradeName: s.name,
-      segment: {
-        id: `seg-${i + 1}`,
-        name: catInfo.subcategory,
-        icon: catInfo.icon,
-        color: catInfo.color,
-      },
-      category: catInfo.category,
-      subcategory: catInfo.subcategory,
-      status: LeadStatus.NEW,
-      priority: Priority.HIGH,
-      score: {
-        total: 80 + (i % 4) * 5,
-        level: ScoreLevel.HIGH,
-      },
-      address: {
-        neighborhood: s.neighborhood,
-        city: s.city,
-        state: s.state,
-        formattedAddress: `${s.neighborhood}, Manaus - AM`,
-        latitude: s.lat,
-        longitude: s.lng,
-      },
-      potentialValue: 3500 + i * 900,
-      distance: +(1.2 + i * 0.8).toFixed(1),
-      createdAt: new Date(Date.now() - i * 3600000 * 4).toISOString(),
-      phone: s.phone,
-    } as any;
-  });
-};
+export function clearAllStoredLeads(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+    localStorage.removeItem(WHATSAPP_DISPATCHED_KEY);
+  } catch (e) {
+    console.error('Error clearing leads:', e);
+  }
+}
 
 export function getStoredLeads(): LeadListItem[] {
   if (typeof window === 'undefined') return [];
@@ -99,11 +64,30 @@ export function getStoredLeads(): LeadListItem[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
+        // Remove quaisquer dados antigos de exemplo/demonstração
+        const seedNames = [
+          'Panificadora Conde do Pão',
+          'Petz Ponta Negra Express',
+          'Barbearia Dom Pedro Manaus',
+          'Drogaria Santo Remédio Adrianópolis',
+          'Supermercado DB Paraíba',
+          'Restaurante Banzeiro Gastronomia',
+          'Academia Live Fitness Vieiralves'
+        ];
+        const cleaned = parsed.filter(l => 
+          !l.id?.startsWith('lead-manaus-') && 
+          !seedNames.includes(l.name)
+        );
 
-        // Normalização e limpeza de todos os telefones: remove DDI 55 e padroniza para (DD) 9XXXX-XXXX
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+          return cleaned;
+        }
+
+        // Normalização e limpeza de todos os telefones: resolve LIDs Baileys, remove DDI 55 e padroniza para (DD) 9XXXX-XXXX
         let phoneChanged = false;
-        const updatedPhones = parsed.map(l => {
+        const updatedPhones = cleaned.map(l => {
           let currentPhone = l.phone || '';
           if (typeof currentPhone === 'string' && currentPhone.startsWith('(92) 3')) {
             currentPhone = currentPhone.replace('(92) 3', '(92) 99');
@@ -113,7 +97,7 @@ export function getStoredLeads(): LeadListItem[] {
           const defaultDDD = stObj?.ddds?.[0] || '92';
           const formatted = formatBrazilianPhone(currentPhone, defaultDDD);
 
-          let leadObj = l;
+          let leadObj = { ...l };
           const cleanDigits = (formatted || currentPhone || '').replace(/\D/g, '');
 
           // Identifica números sem WhatsApp (como o AmorSaúde 92984322275 ou contatos sem telefone)
@@ -130,13 +114,21 @@ export function getStoredLeads(): LeadListItem[] {
             };
           }
 
+          // Se o nome do lead era apenas um ID de LID numérico bruto (ex: 156113521655850)
+          const isNameRawLid = /^\d{14,16}$/.test((leadObj.name || '').trim());
+          if (isNameRawLid) {
+            phoneChanged = true;
+            leadObj.name = `Cliente ${formatted || cleanDigits.slice(-4)}`;
+            if (leadObj.tradeName && /^\d{14,16}$/.test(leadObj.tradeName.trim())) {
+              leadObj.tradeName = leadObj.name;
+            }
+          }
+
           if (formatted && formatted !== l.phone) {
             phoneChanged = true;
-            return {
-              ...leadObj,
-              phone: formatted,
-            };
+            leadObj.phone = formatted;
           }
+
           return leadObj;
         });
         if (phoneChanged) {
@@ -144,15 +136,12 @@ export function getStoredLeads(): LeadListItem[] {
           return updatedPhones;
         }
 
-        return parsed;
+        return cleaned;
       }
     }
-    if (localStorage.getItem('system_reset') === 'true') {
-      return [];
-    }
-    const initial = generateInitialLeads();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
-    return initial;
+    // Instalação nova ou limpa: retorna vazio []
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+    return [];
   } catch (e) {
     console.error('Error reading leads from localStorage:', e);
     return [];
@@ -231,7 +220,7 @@ export async function verifyLeadsWhatsApp(leads: LeadListItem[]): Promise<{ upda
         const token = localStorage.getItem('accessToken');
         if (token) headers['Authorization'] = `Bearer ${token}`;
       }
-      const res = await axios.post('http://localhost:3001/api/whatsapp/check-numbers', { phones: phonesToCheck }, { headers, timeout: 20000 });
+      const res = await axios.post('/api/whatsapp/check-numbers', { phones: phonesToCheck }, { headers, timeout: 20000 });
       checkResults = res.data?.data || res.data?.results || [];
     } catch {
       // API em timeout ou inacessível no momento
@@ -321,7 +310,7 @@ export async function syncDispatchedHistoryWithServer(): Promise<DispatchedLeadR
       const token = localStorage.getItem('accessToken') || localStorage.getItem('auth_token');
       if (token) headers['Authorization'] = `Bearer ${token}`;
     }
-    const res = await axios.get('http://localhost:3001/api/whatsapp/history', { headers, timeout: 5000 });
+    const res = await axios.get('/api/whatsapp/history', { headers, timeout: 5000 });
     const serverData = res.data?.data || res.data;
     if (Array.isArray(serverData)) {
       const local = getDispatchedHistory();
@@ -402,7 +391,7 @@ export function markLeadAsDispatched(record: DispatchedLeadRecord): void {
     saveDispatchedHistoryLocally(updatedHistory);
 
     // Salva também no servidor de forma permanente em disco
-    axios.post('http://localhost:3001/api/whatsapp/history', sanitized, { timeout: 5000 }).catch(err => {
+    axios.post('/api/whatsapp/history', sanitized, { timeout: 5000 }).catch(err => {
       console.warn('Aviso: Não foi possível salvar histórico no servidor:', err?.message);
     });
 
@@ -428,7 +417,7 @@ export function markLeadAsDispatched(record: DispatchedLeadRecord): void {
 export function clearDispatchedHistory(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(WHATSAPP_DISPATCHED_KEY);
-  axios.delete('http://localhost:3001/api/whatsapp/history', { timeout: 4000 }).catch(e => {
+  axios.delete('/api/whatsapp/history', { timeout: 4000 }).catch(e => {
     console.warn('Aviso: Não foi possível limpar histórico no servidor:', e?.message);
   });
 }

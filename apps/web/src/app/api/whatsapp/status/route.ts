@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
   // 1. Se recebemos um status sincronizado recentemente do conector do PC (últimos 30 segundos)
   const cached = globalSyncedState[deviceId] || globalSyncedState['default'];
-  if (cached && (Date.now() - cached.updatedAt) < 30000) {
+  if (req.nextUrl.searchParams.get('fresh') !== '1' && cached && (Date.now() - cached.updatedAt) < 30000) {
     return NextResponse.json({
       success: true,
       data: cached.data,
@@ -61,6 +61,7 @@ export async function GET(req: NextRequest) {
     const localRes = await fetch(statusUrl, {
       headers: {
         'x-device-id': deviceId,
+        Authorization: req.headers.get('Authorization') || '',
       },
       cache: 'no-store',
       signal: AbortSignal.timeout(1500),

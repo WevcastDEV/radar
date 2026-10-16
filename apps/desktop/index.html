@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Conectar ao Servidor - Radar de Oportunidades</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0b1120;
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 1.5rem;
+    }
+    .card {
+      background: #1e293b;
+      padding: 2.25rem;
+      border-radius: 16px;
+      box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.4), 0 8px 10px -6px rgb(0 0 0 / 0.3);
+      border: 1px solid #334155;
+      width: 100%;
+      max-width: 440px;
+      text-align: center;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      margin-bottom: 0.75rem;
+    }
+    .status-box {
+      padding: 0.85rem 1rem;
+      border-radius: 10px;
+      margin-bottom: 1.25rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      line-height: 1.4;
+      display: none;
+      text-align: left;
+    }
+    .status-error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+    .status-success {
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+    .status-info {
+      background: rgba(59, 130, 246, 0.15);
+      color: #93c5fd;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+    }
+    h2 {
+      margin: 0.25rem 0 0.5rem;
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    p.desc {
+      color: #94a3b8;
+      font-size: 0.88rem;
+      line-height: 1.4;
+      margin: 0 0 1.25rem;
+    }
+    .input-wrapper {
+      position: relative;
+      margin-bottom: 0.75rem;
+      text-align: left;
+    }
+    label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #cbd5e1;
+      margin-bottom: 0.35rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    input {
+      width: 100%;
+      padding: 0.85rem 1rem;
+      border-radius: 10px;
+      border: 1.5px solid #334155;
+      background: #0f172a;
+      color: white;
+      font-size: 1rem;
+      font-family: monospace;
+      outline: none;
+      transition: all 0.2s;
+    }
+    input:focus {
+      border-color: #10b981;
+      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+    }
+    button {
+      width: 100%;
+      padding: 0.85rem 1rem;
+      border-radius: 10px;
+      background: #10b981;
+      color: white;
+      border: none;
+      font-size: 0.95rem;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    button:hover:not(:disabled) {
+      background: #059669;
+      transform: translateY(-1px);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: #334155;
+      color: #f1f5f9;
+      margin-top: 0.5rem;
+      font-weight: 700;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: #475569;
+    }
+    .btn-scan {
+      background: #2563eb;
+      color: white;
+      margin-top: 0.5rem;
+      font-weight: 700;
+    }
+    .btn-scan:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+    .spinner {
+      width: 1rem;
+      height: 1rem;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .info {
+      color: #94a3b8;
+      font-size: 0.8rem;
+      margin-top: 1.5rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid #334155;
+      text-align: left;
+      line-height: 1.45;
+    }
+    .info code {
+      background: #0f172a;
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+      color: #38bdf8;
+      font-family: monospace;
+    }
+    .server-list {
+      margin-top: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .server-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 0.8rem;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .server-item:hover {
+      border-color: #10b981;
+      background: rgba(16, 185, 129, 0.08);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div id="status-box" class="status-box"></div>
+
+    <div class="badge">
+      <span style="width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
+      Multi-Máquinas & Rede Local
+    </div>
+    
+    <h2>📡 Conectar ao Servidor</h2>
+    <p class="desc">
+      O Radar conecta automaticamente com o computador principal da sua loja ou escritório.
+    </p>
+
+    <div class="input-wrapper">
+      <label for="ip">Endereço IP do Servidor:</label>
+      <input type="text" id="ip" placeholder="Ex: 192.168.0.29" />
+    </div>
+
+    <button id="btn-connect" onclick="handleConnectClick()">
+      <span>Conectar ao Servidor</span>
+    </button>
+
+    <button id="btn-scan" class="btn-scan" onclick="triggerAutoDiscovery(true)">
+      <span>🔍 Buscar Servidor na Rede Automaticamente</span>
+    </button>
+
+    <button id="btn-local" class="btn-secondary" onclick="connectLocal()">
+      <span>Esta é a máquina principal (Localhost)</span>
+    </button>
+
+    <div class="info">
+      <strong>💡 Reconhecimento Inteligente da Rede:</strong><br>
+      Ao clicar em <em>Buscar Servidor</em>, o sistema escaneia a sua rede Wi-Fi/cabo, encontra o Servidor Central ativo e salva o IP para você nunca mais precisar digitar.
+    </div>
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const failedUrl = urlParams.get('failed');
+    const ipInput = document.getElementById('ip');
+    const statusBox = document.getElementById('status-box');
+    const btnConnect = document.getElementById('btn-connect');
+    const btnScan = document.getElementById('btn-scan');
+
+    function showStatus(text, type = 'info', persist = false) {
+      statusBox.className = `status-box status-${type}`;
+      statusBox.innerHTML = text;
+      statusBox.style.display = 'block';
+    }
+
+    function hideStatus() {
+      statusBox.style.display = 'none';
+    }
+
+    // Limpa formatacao de IP digitado
+    function cleanIp(raw) {
+      return (raw || '')
+        .trim()
+        .replace(/^https?:\/\//i, '')
+        .split(':')[0]
+        .replace(/\/.*$/, '');
+    }
+
+    // Testa se um IP específico tem o Radar de Oportunidades ativo na porta 3000
+    async function testServerReachable(ip, timeoutMs = 1200) {
+      const target = cleanIp(ip);
+      if (!target) return false;
+      try {
+        const controller = new AbortController();
+        const tId = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch(`http://${target}:3000/api/server-info`, {
+          signal: controller.signal,
+          mode: 'cors',
+          cache: 'no-store'
+        });
+        clearTimeout(tId);
+        if (res.ok) {
+          const json = await res.json().catch(() => null);
+          return Boolean(json && (json.success || json.data?.serverIp || json.serverIp));
+        }
+      } catch (e) {
+        // Fallback: tenta /login caso /api/server-info nao responda
+        try {
+          const controller2 = new AbortController();
+          const tId2 = setTimeout(() => controller2.abort(), timeoutMs);
+          const res2 = await fetch(`http://${target}:3000/login`, {
+            signal: controller2.signal,
+            mode: 'no-cors',
+            cache: 'no-store'
+          });
+          clearTimeout(tId2);
+          return true;
+        } catch {}
+      }
+      return false;
+    }
+
+    // Salva o IP confirmado e navega
+    function saveAndRedirect(ip) {
+      const finalIp = cleanIp(ip);
+      localStorage.setItem('server_ip', finalIp);
+      localStorage.setItem('radar_last_saved_ip', finalIp);
+      showStatus(`✅ Conectado ao Servidor (<b>${finalIp}</b>)! Carregando...`, 'success');
+      setTimeout(() => {
+        window.location.href = `http://${finalIp}:3000/login`;
+      }, 500);
+    }
+
+    // Conectar Localhost
+    async function connectLocal() {
+      showStatus('<span class="spinner"></span> Verificando servidor local...', 'info');
+      const ok = await testServerReachable('localhost', 1500);
+      if (ok) {
+        saveAndRedirect('localhost');
+      } else {
+        showStatus('⚠️ Servidor local não respondeu na porta 3000. Certifique-se de executar o <b>INICIAR_SERVIDOR_LOCAL.bat</b>.', 'error');
+      }
+    }
+
+    // Botao Conectar Manual
+    async function handleConnectClick() {
+      const ip = cleanIp(ipInput.value);
+      if (!ip) {
+        showStatus('Por favor, informe o IP do servidor (Ex: 192.168.0.29).', 'error');
+        return;
+      }
+
+      btnConnect.disabled = true;
+      btnConnect.innerHTML = '<span class="spinner"></span> Conectando...';
+      showStatus(`<span class="spinner"></span> Testando conexão com <b>${ip}</b>...`, 'info');
+
+      const isOnline = await testServerReachable(ip, 2200);
+      btnConnect.disabled = false;
+      btnConnect.innerHTML = '<span>Conectar ao Servidor</span>';
+
+      if (isOnline) {
+        saveAndRedirect(ip);
+      } else {
+        showStatus(`❌ Não foi possível conectar a <b>${ip}</b>.<br>Tentando localizar o servidor automaticamente na rede...`, 'error');
+        setTimeout(() => triggerAutoDiscovery(false), 800);
+      }
+    }
+
+    // Busca Automatica de Servidor na Rede Local (Escaneamento inteligente de subrede)
+    let isScanning = false;
+    async function triggerAutoDiscovery(forcedByUser = false) {
+      if (isScanning) return;
+      isScanning = true;
+
+      btnScan.disabled = true;
+      btnScan.innerHTML = '<span class="spinner"></span> Escaneando rede local...';
+      showStatus('<span class="spinner"></span> Escaneando a rede para localizar o Servidor Central...', 'info');
+
+      // 1. Testa localhost primeiro
+      const localOk = await testServerReachable('localhost', 600);
+      if (localOk) {
+        isScanning = false;
+        btnScan.disabled = false;
+        btnScan.innerHTML = '<span>🔍 Buscar Servidor na Rede Automaticamente</span>';
+        saveAndRedirect('localhost');
+        return;
+      }
+
+      // 2. Coleta subredes conhecidas da maquina via Electron ou padroes
+      let subnets = ['192.168.0', '192.168.1', '10.0.0'];
+      try {
+        const netDetails = window.radarDesktop?.getNetworkDetails?.();
+        if (netDetails?.subnets?.length) {
+          subnets = Array.from(new Set([...netDetails.subnets, ...subnets]));
+        }
+      } catch {}
+
+      // Candidatos prioritarios: IPs comuns ou conhecidos
+      const knownIps = [
+        '192.168.0.29',
+        localStorage.getItem('server_ip'),
+        localStorage.getItem('radar_last_saved_ip'),
+        '192.168.0.75',
+        '192.168.1.29',
+        '192.168.0.100',
+        '192.168.1.100',
+      ].filter(Boolean).map(cleanIp);
+
+      for (const ip of knownIps) {
+        if (!ip || ip === 'localhost') continue;
+        const ok = await testServerReachable(ip, 700);
+        if (ok) {
+          isScanning = false;
+          btnScan.disabled = false;
+          btnScan.innerHTML = '<span>🔍 Buscar Servidor na Rede Automaticamente</span>';
+          ipInput.value = ip;
+          saveAndRedirect(ip);
+          return;
+        }
+      }
+
+      // 3. Escaneamento em paralelo da subrede principal (ex: 192.168.0.1 ate 254)
+      const primarySubnet = subnets[0] || '192.168.0';
+      showStatus(`<span class="spinner"></span> Varrendo subrede <b>${primarySubnet}.*</b>...`, 'info');
+
+      let found = null;
+      const batchSize = 25;
+
+      for (let i = 1; i <= 254 && !found; i += batchSize) {
+        const batch = [];
+        for (let j = i; j < i + batchSize && j <= 254; j++) {
+          batch.push(`${primarySubnet}.${j}`);
+        }
+
+        const results = await Promise.all(
+          batch.map(async (candidateIp) => {
+            const ok = await testServerReachable(candidateIp, 900);
+            return ok ? candidateIp : null;
+          })
+        );
+
+        found = results.find(Boolean);
+      }
+
+      isScanning = false;
+      btnScan.disabled = false;
+      btnScan.innerHTML = '<span>🔍 Buscar Servidor na Rede Automaticamente</span>';
+
+      if (found) {
+        ipInput.value = found;
+        saveAndRedirect(found);
+      } else {
+        showStatus('⚠️ Servidor não encontrado automaticamente.<br>Verifique se o <b>INICIAR_SERVIDOR_LOCAL.bat</b> está aberto no PC Principal e se as máquinas estão no mesmo Wi-Fi/rede.', 'error');
+      }
+    }
+
+    // Inicializacao
+    (async function init() {
+      const saved = cleanIp(localStorage.getItem('server_ip') || localStorage.getItem('radar_last_saved_ip'));
+      if (saved) {
+        ipInput.value = saved;
+      } else {
+        ipInput.value = '192.168.0.29';
+      }
+
+      // Se falhou recentemente, exibe aviso e tenta auto-descoberta
+      if (failedUrl) {
+        showStatus('❌ Não foi possível conectar ao IP anterior. Localizando servidor na rede...', 'error');
+        setTimeout(() => triggerAutoDiscovery(false), 400);
+      } else if (saved) {
+        // Tenta reconectar silenciosamente com timeout rapido
+        showStatus('<span class="spinner"></span> Reconectando ao servidor salvo...', 'info');
+        const ok = await testServerReachable(saved, 1200);
+        if (ok) {
+          saveAndRedirect(saved);
+        } else {
+          // IP antigo nao respondeu, inicia busca automatica na rede
+          showStatus('Servidor salvo não respondeu. Buscando novo IP na rede...', 'info');
+          triggerAutoDiscovery(false);
+        }
+      } else {
+        // Primeira vez: tenta auto-descobrir
+        triggerAutoDiscovery(false);
+      }
+    })();
+  </script>
+</body>
+</html>

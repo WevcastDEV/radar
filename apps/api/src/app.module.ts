@@ -12,11 +12,13 @@ import { ProposalsModule } from './proposals/proposals.module';
 import { ProductsModule } from './products/products.module';
 import { CustomersModule } from './customers/customers.module';
 import { TeamsModule } from './teams/teams.module';
+import { UsersModule } from './users/users.module';
 import { GoalsModule } from './goals/goals.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AiModule } from './ai/ai.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { SettingsModule } from './settings/settings.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -34,11 +36,13 @@ import { AppController } from './app.controller';
     ProductsModule,
     CustomersModule,
     TeamsModule,
+    UsersModule,
     GoalsModule,
     ReportsModule,
     NotificationsModule,
     AiModule,
     WhatsappModule,
+    SettingsModule,
   ],
   controllers: [AppController],
 })

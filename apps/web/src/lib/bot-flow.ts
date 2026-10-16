@@ -52,6 +52,7 @@ export interface BotFlow {
 
 export const FLOWS_STORAGE_KEY = 'radar_bot_flows_v1';
 export const ACTIVE_FLOW_ID_KEY = 'radar_active_flow_id_v1';
+export const SELECTED_FLOW_ID_KEY = 'radar_selected_flow_id_v1';
 
 export function normalizeFlowText(str: string): string {
   if (!str) return '';
@@ -113,9 +114,9 @@ export function compileFlowText(
 }
 
 export function getStoredFlows(): BotFlow[] {
-  if (typeof window === 'undefined') return DEFAULT_BOT_FLOWS;
+  if (typeof window === 'undefined') return DEFAULT_BOT_FLOWS.map(flow => ({ ...flow, updatedAt: 0 }));
   try {
-    const raw = localStorage.getItem(FLOWS_STORAGE_KEY);
+    const raw = localStorage.getItem(FLOWS_STORAGE_KEY) || localStorage.getItem('WCTECH_BOT_FLOWS');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -125,8 +126,9 @@ export function getStoredFlows(): BotFlow[] {
         );
         
         if (missingDefaults.length > 0) {
-          const merged = [...parsed, ...missingDefaults];
+          const merged = [...parsed, ...missingDefaults.map(flow => ({ ...flow, updatedAt: 0 }))];
           localStorage.setItem(FLOWS_STORAGE_KEY, JSON.stringify(merged));
+          localStorage.setItem('WCTECH_BOT_FLOWS', JSON.stringify(merged));
           return merged;
         }
 
@@ -134,13 +136,36 @@ export function getStoredFlows(): BotFlow[] {
       }
     }
   } catch {}
-  return DEFAULT_BOT_FLOWS;
+  return DEFAULT_BOT_FLOWS.map(flow => ({ ...flow, updatedAt: 0 }));
 }
 
 export function saveStoredFlows(flows: BotFlow[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(FLOWS_STORAGE_KEY, JSON.stringify(flows));
+    const serialized = JSON.stringify(flows);
+    localStorage.setItem(FLOWS_STORAGE_KEY, serialized);
+    localStorage.setItem('WCTECH_BOT_FLOWS', serialized);
+    window.dispatchEvent(new CustomEvent('flows_updated', { detail: flows }));
+  } catch {}
+}
+
+export function getSelectedFlowIdFromStorage(flows: BotFlow[]): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const savedId = localStorage.getItem(SELECTED_FLOW_ID_KEY);
+      if (savedId && flows.some((f) => f.id === savedId)) {
+        return savedId;
+      }
+    } catch {}
+  }
+  const active = flows.find((f) => f.isActive) || flows[0];
+  return active?.id || 'flow-grafica-rapida';
+}
+
+export function setSelectedFlowIdInStorage(flowId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(SELECTED_FLOW_ID_KEY, flowId);
   } catch {}
 }
 
@@ -148,20 +173,36 @@ export function getActiveFlowIdFromStorage(flows: BotFlow[]): string {
   if (typeof window !== 'undefined') {
     try {
       const savedId = localStorage.getItem(ACTIVE_FLOW_ID_KEY);
-      if (savedId && flows.some((f) => f.id === savedId)) {
+      if (savedId === '' || savedId === 'none') {
+        return '';
+      }
+      if (savedId && flows.some((f) => f.id === savedId && f.isActive)) {
         return savedId;
       }
     } catch {}
   }
-  const active = flows.find((f) => f.isActive) || flows[0];
-  return active?.id || 'flow-clinica-saude';
+  const active = flows.find((f) => f.isActive);
+  return active?.id || '';
 }
 
 export function setActiveFlowIdInStorage(flowId: string): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(ACTIVE_FLOW_ID_KEY, flowId);
+    localStorage.setItem(ACTIVE_FLOW_ID_KEY, flowId || '');
   } catch {}
+}
+
+export function deactivateFlowInStorage(flowId?: string): BotFlow[] {
+  const current = getStoredFlows();
+  const updated = current.map((f) => {
+    if (!flowId || f.id === flowId) {
+      return { ...f, isActive: false };
+    }
+    return f;
+  });
+  saveStoredFlows(updated);
+  setActiveFlowIdInStorage('');
+  return updated;
 }
 
 export function simulateFlowStep(

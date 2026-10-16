@@ -11,6 +11,7 @@ interface KanbanColumnProps {
   stage: PipelineStageData;
   prevStage?: PipelineStageData;
   nextStage?: PipelineStageData;
+  allStages?: PipelineStageData[];
   onDragStart: (e: React.DragEvent, leadId: string) => void;
   onDrop: (e: React.DragEvent) => void;
   onDragOver: (e: React.DragEvent) => void;
@@ -24,6 +25,7 @@ export function KanbanColumn({
   stage, 
   prevStage,
   nextStage,
+  allStages,
   onDragStart, 
   onDrop, 
   onDragOver, 
@@ -52,7 +54,7 @@ export function KanbanColumn({
   return (
     <div 
       className={cn(
-        "min-w-[310px] w-[310px] max-w-[310px] flex flex-col h-full bg-card/60 rounded-2xl border transition-all duration-200 shadow-sm",
+        "w-full min-w-0 flex flex-col h-full bg-card/60 rounded-2xl border transition-all duration-200 shadow-sm",
         isDragOver ? "border-primary ring-2 ring-primary/20 bg-card/90" : "border-border",
         isDragging && !isDragOver ? "border-dashed" : ""
       )}
@@ -101,6 +103,7 @@ export function KanbanColumn({
             currentStageId={stage.id}
             prevStage={prevStage}
             nextStage={nextStage}
+            allStages={allStages}
             onDragStart={(e) => onDragStart(e, lead.id)} 
             onMoveStage={onMoveStage}
             onSelectLead={onSelectLead}

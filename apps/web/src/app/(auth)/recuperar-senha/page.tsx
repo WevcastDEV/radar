@@ -23,6 +23,7 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { WCTechSignature } from '@/components/layout/wctech-signature';
 
 const LINKEDIN_URL = 'https://www.linkedin.com/in/weverton-castelo-branco-005b39355';
 const WHATSAPP_URL = 'https://wa.me/5592992920233';
@@ -341,37 +342,13 @@ export default function RecuperarSenhaPage() {
           </CardFooter>
         </Card>
 
-        {/* Rodapé Informativo WCTECH */}
-        <div className="mt-5 flex flex-col items-center gap-2">
+        {/* Rodapé Informativo */}
+        <div className="mt-5 flex flex-col items-center gap-1.5">
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground font-medium">
             <Laptop className="w-3.5 h-3.5 text-primary" />
             <span>Execução autônoma com Node.js • Banco local seguro</span>
           </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground font-medium">Powered by</span>
-            <span className="text-[11px] font-black text-foreground tracking-wide">WCTECH</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <a
-              href={LINKEDIN_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="LinkedIn"
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition"
-            >
-              <Linkedin className="w-4 h-4" />
-            </a>
-            <a
-              href={WHATSAPP_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Suporte WCTECH"
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 transition"
-            >
-              <MessageCircle className="w-4 h-4" />
-            </a>
-          </div>
+          <WCTechSignature variant="footer" />
         </div>
       </div>
     </div>

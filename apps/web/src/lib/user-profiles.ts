@@ -42,19 +42,28 @@ export function getPersistentProfile(identifierOrEmail?: string, id?: string): P
     return profiles[normId];
   }
 
-  // Busca flexível: prefixo antes do '@' ou nome correspondente
+  // Busca flexível: apenas se o e-mail cadastrado coincidir exatamente
   if (normEmail) {
     for (const key of Object.keys(profiles)) {
       const p = profiles[key];
       if (
         key === normEmail ||
-        key.split('@')[0] === normEmail ||
-        normalizeKey(p.email) === normEmail ||
-        normalizeKey(p.name) === normEmail
+        normalizeKey(p.email) === normEmail
       ) {
         return p;
       }
     }
+  }
+
+  // Se um identificador ou e-mail foi passado e não encontrado, NUNCA vazar dados de outro usuário
+  if (normEmail || normId) {
+    return null;
+  }
+
+  // Fallback genérico APENAS quando nenhum e-mail ou identificador foi fornecido
+  const lastEmail = localStorage.getItem(LAST_ACTIVE_EMAIL_KEY);
+  if (lastEmail && profiles[normalizeKey(lastEmail)]) {
+    return profiles[normalizeKey(lastEmail)];
   }
 
   return null;
@@ -67,6 +76,14 @@ export function getPersistentProfile(identifierOrEmail?: string, id?: string): P
 export function savePersistentProfile(user: { id?: string; email?: string; name?: string; avatar?: string }): void {
   if (typeof window === 'undefined' || (!user.email && !user.id && !user.name)) return;
   try {
+    if (user.avatar !== undefined) {
+      if (user.avatar) {
+        try { localStorage.setItem('radar_custom_avatar', user.avatar); } catch {}
+      } else {
+        try { localStorage.removeItem('radar_custom_avatar'); } catch {}
+      }
+    }
+
     const profiles = getAllPersistentProfiles();
     const primaryKey = normalizeKey(user.email) || normalizeKey(user.id) || normalizeKey(user.name);
     if (!primaryKey) return;
@@ -77,7 +94,7 @@ export function savePersistentProfile(user: { id?: string; email?: string; name?
       id: user.id || existing.id,
       email: user.email || existing.email || primaryKey,
       name: user.name || existing.name,
-      avatar: user.avatar !== undefined ? user.avatar : existing.avatar,
+      avatar: user.avatar !== undefined ? user.avatar : (existing.avatar || localStorage.getItem('radar_custom_avatar') || undefined),
       updatedAt: Date.now(),
     };
 
@@ -89,9 +106,18 @@ export function savePersistentProfile(user: { id?: string; email?: string; name?
       profiles[normalizeKey(user.email)] = updated;
     }
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+    } catch (e) {
+      // Se localStorage falhar por quota, limpa perfis antigos mas mantém o atual
+      try {
+        const miniProfiles: Record<string, PersistentUserProfile> = { [primaryKey]: updated };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(miniProfiles));
+      } catch {}
+    }
+
     if (updated.email) {
-      localStorage.setItem(LAST_ACTIVE_EMAIL_KEY, updated.email);
+      try { localStorage.setItem(LAST_ACTIVE_EMAIL_KEY, updated.email); } catch {}
     }
 
     // Sincroniza também com contas salvas de login (radar_saved_accounts_v1)
@@ -164,9 +190,26 @@ export function mergeWithPersistentProfile<T extends { id?: string; email?: stri
   const saved = getPersistentProfile(user.email, user.id);
   if (!saved) return user;
 
+  const isSameUser = 
+    !saved.email || 
+    !user.email || 
+    normalizeKey(saved.email) === normalizeKey(user.email);
+
+  if (!isSameUser) return user;
+
+  let finalName = saved.name || user.name;
+  if (user.email && normalizeKey(user.email) === 'tom@criart.com' && finalName && normalizeKey(finalName).includes('karyna')) {
+    finalName = 'Tom';
+  }
+
+  let finalAvatar = saved.avatar !== undefined ? saved.avatar : user.avatar;
+  if (user.email && normalizeKey(user.email) === 'tom@criart.com' && saved.email && normalizeKey(saved.email) !== 'tom@criart.com') {
+    finalAvatar = undefined;
+  }
+
   return {
     ...user,
-    name: saved.name || user.name,
-    avatar: saved.avatar !== undefined ? saved.avatar : user.avatar,
+    name: finalName,
+    avatar: finalAvatar,
   };
 }

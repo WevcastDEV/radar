@@ -53,9 +53,9 @@ export class BotFlowService {
             }
           }
           const active = this.flows.find(f => f.isActive);
-          if (active) this.activeFlowId = active.id;
+          this.activeFlowId = active ? active.id : '';
           this.saveFlowsToDisk();
-          this.logger.log(`Carregados ${this.flows.length} fluxos de conversação. Fluxo ativo: "${this.activeFlowId}".`);
+          this.logger.log(`Carregados ${this.flows.length} fluxos de conversação. Fluxo ativo: "${this.activeFlowId || 'Nenhum (Robô Silenciado)'}".`);
           return;
         }
       }
@@ -66,7 +66,7 @@ export class BotFlowService {
     // Inicializa com templates padrão
     this.flows = [...DEFAULT_BOT_FLOWS];
     const active = this.flows.find(f => f.isActive);
-    if (active) this.activeFlowId = active.id;
+    this.activeFlowId = active ? active.id : '';
     this.saveFlowsToDisk();
   }
 
@@ -87,24 +87,96 @@ export class BotFlowService {
   }
 
   getActiveFlow(): BotFlow | null {
-    return this.flows.find(f => f.id === this.activeFlowId) || this.flows[0] || null;
+    if (this.activeFlowId) {
+      const active = this.flows.find(f => f.id === this.activeFlowId && f.isActive);
+      if (active) return active;
+    }
+    const anyActive = this.flows.find(f => f.isActive);
+    if (anyActive) {
+      this.activeFlowId = anyActive.id;
+      return anyActive;
+    }
+    // IMPORTANTE: Nunca usar fallback para this.flows[0]!
+    // Se nenhum fluxo estiver com isActive: true, o robô deve permanecer 100% em silêncio.
+    return null;
+  }
+
+  isBotActive(): boolean {
+    const active = this.getActiveFlow();
+    return Boolean(active && active.isActive && active.steps && active.steps.length > 0);
   }
 
   setActiveFlow(id: string): BotFlow | null {
     const found = this.flows.find(f => f.id === id);
-    if (!found) return null;
+    if (!found || id === 'all' || !Array.isArray(found.steps) || found.steps.length === 0) return null;
+
+    if (this.activeFlowId !== id) this.sessions.clear();
 
     this.flows = this.flows.map(f => ({
       ...f,
       isActive: f.id === id,
     }));
     this.activeFlowId = id;
+    this.lastActiveFlowId = id;
     this.saveFlowsToDisk();
     this.logger.log(`Fluxo ativado para o robô: "${found.name}" (${found.id})`);
-    return found;
+    return { ...found, isActive: true };
   }
 
-  saveFlow(flowData: Partial<BotFlow>): BotFlow {
+  // Último fluxo ativo (memória) — usado pela Chave Universal para religar o robô
+  private lastActiveFlowId = '';
+
+  /**
+   * Reativa o último fluxo usado (ou o preferido / primeiro com etapas) quando a
+   * Chave Universal é LIGADA após um desligamento global.
+   */
+  restoreActiveFlow(preferredId?: string): BotFlow | null {
+    if (this.isBotActive()) return this.getActiveFlow();
+    const hasSteps = (f?: BotFlow | null) => Boolean(f && Array.isArray(f.steps) && f.steps.length > 0);
+    const candidates = [preferredId, this.lastActiveFlowId, 'flow-grafica-rapida']
+      .filter(Boolean)
+      .map(id => this.flows.find(f => f.id === id))
+      .filter(hasSteps) as BotFlow[];
+    const target = candidates[0] || this.flows.find(f => hasSteps(f));
+    if (!target) return null;
+    return this.setActiveFlow(target.id);
+  }
+
+  deactivateFlow(id: string): BotFlow | null {
+    const found = this.flows.find(f => f.id === id);
+    if (!found && id !== 'all') return null;
+    if (id === 'all') { this.deactivateAllFlows(); return null; }
+
+    this.flows = this.flows.map(f => {
+      if (f.id === id) {
+        return { ...f, isActive: false };
+      }
+      return f;
+    });
+    if (this.activeFlowId === id) {
+      this.lastActiveFlowId = id;
+      this.activeFlowId = '';
+      this.sessions.clear();
+    }
+    this.saveFlowsToDisk();
+    this.logger.log(`Fluxo desativado: "${found.name}" (${found.id}). Robô silenciado.`);
+    return { ...found, isActive: false };
+  }
+
+  deactivateAllFlows(): void {
+    if (this.activeFlowId) this.lastActiveFlowId = this.activeFlowId;
+    this.flows = this.flows.map(f => ({
+      ...f,
+      isActive: false,
+    }));
+    this.activeFlowId = '';
+    this.sessions.clear();
+    this.saveFlowsToDisk();
+    this.logger.log(`Todos os fluxos foram desativados. Robô em silêncio absoluto.`);
+  }
+
+  saveFlow(rawInput: any): BotFlow {
+    const flowData: Partial<BotFlow> = rawInput?.flow || rawInput?.data || rawInput;
     const now = Date.now();
     let flow: BotFlow;
 
@@ -114,6 +186,8 @@ export class BotFlowService {
         flow = {
           ...this.flows[idx],
           ...flowData,
+          // Somente a ação explícita do Chat Comercial pode mudar a ativação.
+          isActive: this.flows[idx].isActive,
           updatedAt: now,
         } as BotFlow;
         this.flows[idx] = flow;
@@ -124,7 +198,7 @@ export class BotFlowService {
           segment: flowData.segment || 'Geral',
           companyName: flowData.companyName || 'Nossa Empresa',
           description: flowData.description || '',
-          isActive: Boolean(flowData.isActive),
+          isActive: false,
           createdAt: now,
           updatedAt: now,
           steps: flowData.steps || [],
@@ -141,7 +215,7 @@ export class BotFlowService {
         segment: flowData.segment || 'Geral',
         companyName: flowData.companyName || 'Nossa Empresa',
         description: flowData.description || '',
-        isActive: Boolean(flowData.isActive),
+        isActive: false,
         createdAt: now,
         updatedAt: now,
         steps: flowData.steps || [],
@@ -151,22 +225,29 @@ export class BotFlowService {
       this.flows.push(flow);
     }
 
-    if (flow.isActive) {
-      this.activeFlowId = flow.id;
-      this.flows = this.flows.map(f => ({ ...f, isActive: f.id === flow.id }));
-    }
-
     this.saveFlowsToDisk();
+    this.logger.log(`💾 Fluxo salvo no disco: "${flow.name}" (${flow.id}) com ${flow.steps?.length || 0} etapas. Ativo: ${flow.isActive}`);
     return flow;
+  }
+
+  saveAllFlows(flowsList: BotFlow[]): BotFlow[] {
+    if (!Array.isArray(flowsList) || flowsList.length === 0) return this.flows;
+    const activeId = this.getActiveFlow()?.id;
+    this.flows = flowsList.map(flow => ({ ...flow, isActive: flow.id === activeId }));
+    const active = this.flows.find(f => f.isActive);
+    this.activeFlowId = active ? active.id : '';
+    this.saveFlowsToDisk();
+    this.logger.log(`💾 ${this.flows.length} fluxos salvos em lote no disco. Fluxo ativo: "${this.activeFlowId || 'Nenhum (Robô Silenciado)'}".`);
+    return this.flows;
   }
 
   deleteFlow(id: string): boolean {
     const initialLen = this.flows.length;
     this.flows = this.flows.filter(f => f.id !== id);
     if (this.flows.length !== initialLen) {
-      if (this.activeFlowId === id && this.flows.length > 0) {
-        this.flows[0].isActive = true;
-        this.activeFlowId = this.flows[0].id;
+      if (this.activeFlowId === id) {
+        const remainingActive = this.flows.find(f => f.isActive);
+        this.activeFlowId = remainingActive ? remainingActive.id : '';
       }
       this.saveFlowsToDisk();
       return true;
@@ -176,6 +257,10 @@ export class BotFlowService {
 
   resetSession(senderId: string) {
     this.sessions.delete(senderId);
+  }
+
+  clearAllSessions(): void {
+    this.sessions.clear();
   }
 
   getSession(senderId: string): UserFlowSession | undefined {
@@ -323,23 +408,35 @@ export class BotFlowService {
       }
 
       if (matchedOpt) {
+        session.fallbackPromptCount = 0;
         actionTriggered = matchedOpt.action;
         nextStep = flow.steps.find(s => s.id === matchedOpt!.nextStepId) || null;
         if (currentStep.saveToField) {
           session.collectedData[currentStep.saveToField] = matchedOpt.label;
         }
       } else {
-        // Se a pessoa respondeu texto livre ou opção inválida:
+        // Se a pessoa respondeu texto livre ou opção que não bateu com número:
         if (currentStep.freeTextNextStepId) {
+          session.fallbackPromptCount = 0;
           nextStep = flow.steps.find(s => s.id === currentStep.freeTextNextStepId) || null;
           if (currentStep.saveToField) {
             session.collectedData[currentStep.saveToField] = cleanInput;
           }
         } else {
-          // Repete as opções disponíveis de maneira amigável
+          // Proteção anti-duplicação: Se já enviou uma vez ou se o cliente digitou texto livre/foto, encaminha para atendimento humano sem insistir!
+          if (session.fallbackPromptCount && session.fallbackPromptCount >= 1) {
+            session.currentStepId = 'FINALIZADO';
+            return {
+              reply: `Recebemos sua mensagem! 🧡 Nossa equipe da *${flow.companyName || 'CRIART BRASIL'}* já está assumindo seu atendimento aqui para te ajudar pessoalmente. Em instantes nosso atendente falará com você! 😊`,
+              isEnd: true,
+              action: 'transfer_human',
+              stepTitle: 'Transferência Humana',
+            };
+          }
+          session.fallbackPromptCount = 1;
           const optionsPrompt = currentStep.options.map(o => `*${o.key}* - ${o.label}`).join('\n');
           return {
-            reply: `Por favor, digite o número da opção desejada:\n\n${optionsPrompt}`,
+            reply: `Por favor, digite o número da opção desejada (ou mande sua ideia/foto que já chamamos um atendente):\n\n${optionsPrompt}`,
             stepTitle: currentStep.title,
           };
         }

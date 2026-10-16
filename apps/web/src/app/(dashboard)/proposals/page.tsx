@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -19,11 +19,18 @@ import {
   Cpu, 
   Layers, 
   Wrench,
+  Package,
+  Store,
   X,
-  Check
+  Check,
+  Trash2,
+  Building2
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import toast from 'react-hot-toast';
+import { useConfirm } from '@/components/ui/confirm-dialog';
+
+export type ProposalCategory = 'produtos' | 'servicos' | 'recorrencia' | 'projetos' | 'geral';
 
 export interface ProposalItem {
   id: string;
@@ -31,7 +38,7 @@ export interface ProposalItem {
   clientPhone?: string;
   clientContact?: string;
   title: string;
-  category: 'site' | 'software' | 'automation' | 'support';
+  category: ProposalCategory;
   total: number;
   pixDiscountPercent: number;
   installmentsCount: number;
@@ -41,139 +48,88 @@ export interface ProposalItem {
   date: string;
   validUntil: string;
   deadline: string;
+  companyName: string;
+  companyPhone?: string;
+  companyDetails?: string;
   seller: string;
   scope: string[];
   notes?: string;
 }
 
-const CATEGORY_DEFAULT_SCOPES: Record<string, { label: string; icon: any; scope: string[] }> = {
-  site: {
-    label: 'Criação de Site & Presença Digital',
-    icon: Globe,
+const CATEGORY_DEFAULT_SCOPES: Record<ProposalCategory, { label: string; icon: any; defaultTitle: string; defaultTotal: number; defaultMonthly: number; scope: string[] }> = {
+  produtos: {
+    label: 'Produtos & Mercadorias',
+    icon: Package,
+    defaultTitle: 'Fornecimento de Produtos / Mercadorias Comerciais',
+    defaultTotal: 1500,
+    defaultMonthly: 0,
     scope: [
-      'Design Exclusivo, Moderno e 100% Responsivo (Celular, Tablet e Computador)',
-      'Otimização Completa para o Google (SEO Local e Carregamento Ultrarrápido)',
-      'Botões de Ação Direta para Conversão de Clientes via WhatsApp',
-      'Painel Administrativo Simplificado para Gerenciamento de Conteúdo e Fotos',
-      'Configuração de Domínio Personalizado e Certificado de Segurança SSL (HTTPS)'
+      'Separação e fornecimento com conferência rigorosa de itens',
+      'Garantia de procedência e nota fiscal inclusa',
+      'Condições comerciais negociadas e prazo de entrega pontual',
+      'Suporte e assistência direta ao cliente'
     ]
   },
-  software: {
-    label: 'Sistema / Software Sob Medida',
-    icon: Cpu,
-    scope: [
-      'Desenvolvimento de Módulos Personalizados de Controle e Gestão',
-      'Painel Dashboard com Métricas, Gráficos e Relatórios de Vendas',
-      'Níveis de Acesso e Permissões Seguras para Usuários e Colaboradores',
-      'Backup Automático em Nuvem e Proteção Criptográfica de Dados',
-      'Treinamento Operacional Completo da Equipe e Manual de Uso'
-    ]
-  },
-  automation: {
-    label: 'Automação Comercial & Robô WhatsApp',
-    icon: Layers,
-    scope: [
-      'Configuração de Atendente Virtual Inteligente 24/7 sem Deixar Clientes Esperando',
-      'Triagem Automática de Dúvidas, Preços e Encaminhamento para Atendente Humano',
-      'Integração de Notificações em Tempo Real de Novos Pedidos / Leads',
-      'Blindagem Anti-Bloqueio com Motor de Variação de Textos e Intervalo Humano',
-      'Relatórios Periódicos de Atendimentos e Taxa de Conversão de Clientes'
-    ]
-  },
-  support: {
-    label: 'Manutenção, Suporte & Redes',
+  servicos: {
+    label: 'Prestação de Serviços & Mão de Obra',
     icon: Wrench,
+    defaultTitle: 'Prestação de Serviços Especializados / Execução',
+    defaultTotal: 1800,
+    defaultMonthly: 0,
     scope: [
-      'Diagnóstico Preventivo Completo de Computadores e Servidores',
-      'Otimização de Desempenho e Eliminação de Lentidão ou Travamentos',
-      'Estruturação de Rede Cabeada, Wi-Fi Comercial e Segurança de Dados',
-      'Atendimento Ágil com Chamados Presenciais e Suporte Remoto Imediato',
-      'Tabela Diferenciada para Reposição de Peças e Upgrades'
+      'Execução técnica por profissionais qualificados',
+      'Relatório de entrega e alinhamento de expectativas',
+      'Garantia sobre os serviços prestados',
+      'Atendimento prioritário em caso de dúvidas'
+    ]
+  },
+  recorrencia: {
+    label: 'Planos & Mensalidade',
+    icon: Layers,
+    defaultTitle: 'Plano de Acompanhamento Mensal / Suporte Contínuo',
+    defaultTotal: 0,
+    defaultMonthly: 350,
+    scope: [
+      'Atendimento e suporte contínuo durante todo o mês',
+      'Acompanhamento periódico preventivo e corretivo',
+      'Canal direto no WhatsApp para chamados e solicitações',
+      'Relatório mensal de acompanhamento e resultados'
+    ]
+  },
+  projetos: {
+    label: 'Projetos, Obras & Instalações',
+    icon: Cpu,
+    defaultTitle: 'Projeto Comercial / Instalação & Implementação',
+    defaultTotal: 3500,
+    defaultMonthly: 0,
+    scope: [
+      'Planejamento, cronograma de execução e entrega estruturada',
+      'Instalação, testes e validação técnica completa',
+      'Treinamento e orientações de uso para a equipe',
+      'Garantia integral e manual de instruções'
+    ]
+  },
+  geral: {
+    label: 'Proposta Comercial Geral',
+    icon: Store,
+    defaultTitle: 'Proposta Comercial de Soluções e Atendimento',
+    defaultTotal: 2000,
+    defaultMonthly: 0,
+    scope: [
+      'Atendimento personalizado de acordo com as necessidades do cliente',
+      'Cronograma transparente com prazos acordados',
+      'Condições de pagamento facilitadas (PIX com desconto ou parcelado)',
+      'Garantia de satisfação e acompanhamento dedicado'
     ]
   }
 };
 
-const INITIAL_PROPOSALS: ProposalItem[] = typeof window !== 'undefined' && localStorage.getItem('system_reset') === 'true' ? [] : [
-  {
-    id: 'PROP-2026-001',
-    client: 'Panificadora & Confeitaria Conde',
-    clientPhone: '92981234567',
-    clientContact: 'Roberto Conde (Diretor)',
-    title: 'Site Institucional + Cardápio Digital + Automação WhatsApp',
-    category: 'site',
-    total: 2800,
-    pixDiscountPercent: 5,
-    installmentsCount: 10,
-    monthly: 150,
-    status: 'Negociação',
-    statusColor: 'warning',
-    date: '08/09/2026',
-    validUntil: '23/09/2026',
-    deadline: '8 a 12 dias úteis',
-    seller: 'Weverton (WCTech)',
-    scope: [
-      'Site Profissional com Cardápio Online Interativo e Fotos em Alta Resolução',
-      'Integração Direta com Pedidos via WhatsApp para Reduzir Erros da Equipe',
-      'Otimização para Busca do Google "Padaria em Manaus / Pão Quente"',
-      'Certificado de Segurança SSL e Hospedagem em Alta Velocidade',
-      'Garantia Técnica de 90 Dias e Suporte Humanizado'
-    ],
-    notes: 'Cliente solicitou inclusão de botão para encomendas de tortas e bolos com 24h de antecedência.'
-  },
-  {
-    id: 'PROP-2026-002',
-    client: 'Centro Automotivo Imperial',
-    clientPhone: '92992345678',
-    clientContact: 'Marcos Imperial',
-    title: 'Sistema de Orçamentos, OS & Histórico de Clientes',
-    category: 'software',
-    total: 4500,
-    pixDiscountPercent: 5,
-    installmentsCount: 12,
-    monthly: 220,
-    status: 'Enviada',
-    statusColor: 'primary',
-    date: '09/09/2026',
-    validUntil: '24/09/2026',
-    deadline: '15 dias úteis',
-    seller: 'Weverton (WCTech)',
-    scope: [
-      'Controle de Ordens de Serviço (OS) com Envio Automático em PDF no WhatsApp do Cliente',
-      'Cadastro de Clientes, Placas de Veículos e Histórico Completo de Revisões',
-      'Módulo de Caixa, Emissão de Recibos e Controle Financeiro Simples',
-      'Painel no Celular para Acompanhar o Faturamento em Tempo Real',
-      'Treinamento Presencial da Equipe de Balcão e Oficina'
-    ]
-  },
-  {
-    id: 'PROP-2026-003',
-    client: 'Clínica OdontoPrime Manaus',
-    clientPhone: '92984567890',
-    clientContact: 'Dra. Vanessa Lins',
-    title: 'Robô de Confirmação de Consultas & Captação no WhatsApp',
-    category: 'automation',
-    total: 1900,
-    pixDiscountPercent: 5,
-    installmentsCount: 6,
-    monthly: 180,
-    status: 'Aceita',
-    statusColor: 'success',
-    date: '05/09/2026',
-    validUntil: '20/09/2026',
-    deadline: '5 dias úteis',
-    seller: 'Weverton (WCTech)',
-    scope: [
-      'Robô Automático de Disparo de Lembretes de Consulta 24h antes para Reduzir Faltas',
-      'Menu de Autoatendimento com Informações de Convênios, Endereço e Horários',
-      'Transferência Imediata para Atendente Humano em Casos de Emergência Dental',
-      'Integração Completa sem Trocar o Número de WhatsApp da Clínica',
-      'Suporte Prioritário e Relatório Mensal de Consultas Confirmadas'
-    ]
-  }
-];
+const PROPOSALS_STORAGE_KEY = 'radar_proposals_data';
 
 export default function ProposalsPage() {
-  const [proposals, setProposals] = useState<ProposalItem[]>(INITIAL_PROPOSALS);
+  const confirm = useConfirm();
+  const [proposals, setProposals] = useState<ProposalItem[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -182,8 +138,72 @@ export default function ProposalsPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [activeOnePager, setActiveOnePager] = useState<ProposalItem | null>(null);
 
+  // Formulário Nova Proposta Universal
+  const [formCompany, setFormCompany] = useState('');
+  const [formCompanyPhone, setFormCompanyPhone] = useState('');
+  const [formSeller, setFormSeller] = useState('');
+  const [formClient, setFormClient] = useState('');
+  const [formClientPhone, setFormClientPhone] = useState('');
+  const [formClientContact, setFormClientContact] = useState('');
+  const [formCategory, setFormCategory] = useState<ProposalCategory>('geral');
+  const [formTitle, setFormTitle] = useState(CATEGORY_DEFAULT_SCOPES.geral.defaultTitle);
+  const [formTotal, setFormTotal] = useState(String(CATEGORY_DEFAULT_SCOPES.geral.defaultTotal));
+  const [formMonthly, setFormMonthly] = useState(String(CATEGORY_DEFAULT_SCOPES.geral.defaultMonthly));
+  const [formDeadline, setFormDeadline] = useState('5 a 7 dias úteis');
+  const [formScope, setFormScope] = useState<string[]>(CATEGORY_DEFAULT_SCOPES.geral.scope);
+  const [newScopeInput, setNewScopeInput] = useState('');
+  const [formNotes, setFormNotes] = useState('');
+
+  // Carregar dados limpos do localStorage - ZERO exemplos
+  useEffect(() => {
+    try {
+      const savedCompany = localStorage.getItem('radar_company_name') || '';
+      const savedPhone = localStorage.getItem('radar_company_phone') || '';
+      const savedSeller = localStorage.getItem('radar_seller_name') || '';
+      setFormCompany(savedCompany || 'Minha Empresa');
+      setFormCompanyPhone(savedPhone);
+      setFormSeller(savedSeller || 'Comercial');
+
+      const raw = localStorage.getItem(PROPOSALS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          // Remove quaisquer exemplos antigos mockados
+          const mockClients = [
+            'Panificadora & Confeitaria Conde',
+            'Centro Automotivo Imperial',
+            'Clínica OdontoPrime Manaus',
+            'Padaria Bella Vista'
+          ];
+          const cleanList = parsed.filter(p => 
+            !['PROP-2026-001', 'PROP-2026-002', 'PROP-2026-003', 'PROP-2026-004'].includes(p.id) &&
+            !mockClients.includes(p.client)
+          );
+          setProposals(cleanList);
+          localStorage.setItem(PROPOSALS_STORAGE_KEY, JSON.stringify(cleanList));
+          setIsLoaded(true);
+          return;
+        }
+      }
+      setProposals([]);
+      localStorage.setItem(PROPOSALS_STORAGE_KEY, JSON.stringify([]));
+    } catch {
+      setProposals([]);
+    }
+    setIsLoaded(true);
+  }, []);
+
+  const persistProposals = (newProps: ProposalItem[]) => {
+    setProposals(newProps);
+    try {
+      localStorage.setItem(PROPOSALS_STORAGE_KEY, JSON.stringify(newProps));
+    } catch (e) {
+      console.error('Erro ao salvar propostas:', e);
+    }
+  };
+
   // Fechar modais ao pressionar tecla ESC
-  React.useEffect(() => {
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setActiveOnePager(null);
@@ -194,41 +214,14 @@ export default function ProposalsPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Formulário Nova Proposta
-  const [formClient, setFormClient] = useState('');
-  const [formClientPhone, setFormClientPhone] = useState('');
-  const [formClientContact, setFormClientContact] = useState('');
-  const [formCategory, setFormCategory] = useState<'site' | 'software' | 'automation' | 'support'>('site');
-  const [formTitle, setFormTitle] = useState('Criação de Site Profissional & Otimização Google');
-  const [formTotal, setFormTotal] = useState('2500');
-  const [formMonthly, setFormMonthly] = useState('120');
-  const [formDeadline, setFormDeadline] = useState('7 a 10 dias úteis');
-  const [formScope, setFormScope] = useState<string[]>(CATEGORY_DEFAULT_SCOPES.site.scope);
-  const [newScopeInput, setNewScopeInput] = useState('');
-  const [formNotes, setFormNotes] = useState('');
-
-  // Ao mudar de categoria no modal, preenche título e escopo sugeridos
-  const handleCategoryChange = (cat: 'site' | 'software' | 'automation' | 'support') => {
+  // Ao mudar de categoria no modal, preenche valores sugeridos
+  const handleCategoryChange = (cat: ProposalCategory) => {
     setFormCategory(cat);
     const defaults = CATEGORY_DEFAULT_SCOPES[cat];
     setFormScope(defaults.scope);
-    if (cat === 'site') {
-      setFormTitle('Criação de Site Profissional & Otimização Google');
-      setFormTotal('2500');
-      setFormMonthly('120');
-    } else if (cat === 'software') {
-      setFormTitle('Desenvolvimento de Sistema de Gestão Sob Medida');
-      setFormTotal('4200');
-      setFormMonthly('200');
-    } else if (cat === 'automation') {
-      setFormTitle('Automação de Atendimento & Robô Comercial WhatsApp');
-      setFormTotal('1800');
-      setFormMonthly('150');
-    } else if (cat === 'support') {
-      setFormTitle('Contrato Mensal de Suporte Técnico & Infraestrutura');
-      setFormTotal('0');
-      setFormMonthly('850');
-    }
+    setFormTitle(defaults.defaultTitle);
+    setFormTotal(String(defaults.defaultTotal));
+    setFormMonthly(String(defaults.defaultMonthly));
   };
 
   const handleToggleScopeItem = (index: number) => {
@@ -242,20 +235,80 @@ export default function ProposalsPage() {
     setNewScopeInput('');
   };
 
+  const handleOpenCreateModal = () => {
+    setFormClient('');
+    setFormClientPhone('');
+    setFormClientContact('');
+    handleCategoryChange('geral');
+    setFormNotes('');
+    setIsCreateModalOpen(true);
+  };
+
+  const handleDeleteProposal = async (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const target = proposals.find(p => p.id === id);
+    if (!target) return;
+
+    const confirmed = await confirm({
+      title: 'Excluir Proposta Comercial',
+      description: `Tem certeza que deseja excluir a proposta de "${target.client}"? Esta ação removerá o orçamento permanentemente.`,
+      confirmText: 'Sim, Excluir',
+      cancelText: 'Cancelar',
+      variant: 'danger',
+      icon: 'trash',
+    });
+
+    if (confirmed) {
+      const updated = proposals.filter(p => p.id !== id);
+      persistProposals(updated);
+      if (activeOnePager && activeOnePager.id === id) {
+        setActiveOnePager(null);
+      }
+      toast.success('Proposta excluída com sucesso!');
+    }
+  };
+
+  const handleClearAllProposals = async () => {
+    const confirmed = await confirm({
+      title: 'Limpar Todas as Propostas Comerciais',
+      description: 'Deseja remover todas as propostas cadastradas? A lista ficará 100% zerada.',
+      confirmText: 'Sim, Limpar Propostas',
+      cancelText: 'Cancelar',
+      variant: 'danger',
+      icon: 'trash',
+    });
+
+    if (confirmed) {
+      persistProposals([]);
+      setActiveOnePager(null);
+      toast.success('Todas as propostas foram limpas com sucesso!');
+    }
+  };
+
   const handleSaveProposal = () => {
     if (!formClient.trim() || !formTitle.trim()) {
-      toast.error('Preencha o nome do cliente e o título do projeto!');
+      toast.error('Preencha o nome do cliente e o título da proposta!');
       return;
     }
 
     const totalNum = Number(formTotal) || 0;
     const monthlyNum = Number(formMonthly) || 0;
-
     const today = new Date();
     const validDate = new Date(today.getTime() + 15 * 24 * 60 * 60 * 1000);
 
+    const companyFinal = formCompany.trim() || 'Minha Empresa';
+    const sellerFinal = formSeller.trim() || 'Comercial';
+    const phoneFinal = formCompanyPhone.trim();
+
+    // Salvar preferências de empresa/vendedor para futuras propostas
+    try {
+      localStorage.setItem('radar_company_name', companyFinal);
+      localStorage.setItem('radar_seller_name', sellerFinal);
+      if (phoneFinal) localStorage.setItem('radar_company_phone', phoneFinal);
+    } catch {}
+
     const newProp: ProposalItem = {
-      id: `PROP-2026-${String(proposals.length + 1).padStart(3, '0')}`,
+      id: `PROP-${Date.now().toString().slice(-6)}`,
       client: formClient.trim(),
       clientPhone: formClientPhone.trim(),
       clientContact: formClientContact.trim() || formClient.trim(),
@@ -269,30 +322,35 @@ export default function ProposalsPage() {
       statusColor: 'outline',
       date: today.toLocaleDateString('pt-BR'),
       validUntil: validDate.toLocaleDateString('pt-BR'),
-      deadline: formDeadline.trim() || '7 a 10 dias úteis',
-      seller: 'Weverton (WCTech)',
+      deadline: formDeadline.trim() || 'A combinar',
+      companyName: companyFinal,
+      companyPhone: phoneFinal,
+      companyDetails: 'Atendimento Comercial e Vendas',
+      seller: sellerFinal,
       scope: formScope.length > 0 ? formScope : CATEGORY_DEFAULT_SCOPES[formCategory].scope,
       notes: formNotes.trim() || undefined
     };
 
-    setProposals([newProp, ...proposals]);
+    persistProposals([newProp, ...proposals]);
     setIsCreateModalOpen(false);
     setActiveOnePager(newProp);
     toast.success('Proposta One-Pager gerada com sucesso!');
   };
 
   // Filtragem de propostas
-  const filteredProposals = proposals.filter(p => {
-    const matchesSearch = 
-      p.client.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.id.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
-    const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
-    return matchesSearch && matchesCategory && matchesStatus;
-  });
+  const filteredProposals = useMemo(() => {
+    return proposals.filter(p => {
+      const matchesSearch = 
+        p.client.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.id.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
+      const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
+      return matchesSearch && matchesCategory && matchesStatus;
+    });
+  }, [proposals, searchQuery, categoryFilter, statusFilter]);
 
-  // Disparo de impressão rápida (One-Pager em A4)
+  // Impressão rápida (One-Pager em A4)
   const handlePrintOnePager = () => {
     window.print();
   };
@@ -301,45 +359,52 @@ export default function ProposalsPage() {
   const handleSendViaWhatsApp = (prop: ProposalItem) => {
     const rawPhone = (prop.clientPhone || '').replace(/\D/g, '');
     const cleanPhone = rawPhone.length === 10 || rawPhone.length === 11 ? `55${rawPhone}` : rawPhone;
-
     const pixTotal = prop.total * (1 - prop.pixDiscountPercent / 100);
 
     const message = 
       `Olá *${prop.clientContact || prop.client}*! Tudo bem?\n\n` +
-      `Aqui é o Weverton da *WCTech Soluções em Tecnologia*.\n\n` +
-      `Conforme conversamos, elaborei a proposta comercial para o seu projeto:\n` +
+      `Aqui é o(a) ${prop.seller || 'consultor comercial'} da *${prop.companyName || 'nossa empresa'}*.\n\n` +
+      `Conforme alinhamos, elaborei a proposta comercial para o seu atendimento:\n` +
       `📄 *Proposta:* ${prop.title} (${prop.id})\n` +
-      `⏱️ *Prazo de Entrega:* ${prop.deadline}\n\n` +
+      `⏱️ *Prazo de Entrega / Execução:* ${prop.deadline}\n\n` +
       `💰 *Investimento:* ${formatCurrency(prop.total)} em até ${prop.installmentsCount}x sem juros\n` +
       `⚡ *À vista no PIX (${prop.pixDiscountPercent}% de desconto):* ${formatCurrency(pixTotal)}\n` +
-      (prop.monthly > 0 ? `🛠️ *Manutenção/Suporte Mensal:* ${formatCurrency(prop.monthly)}/mês\n\n` : '\n') +
-      `🛡️ *Garantia:* 90 dias com suporte prioritário incluso.\n\n` +
-      `Você pode conferir nossos projetos recentes no site oficial: https://wctech.web.app/\n\n` +
-      `Podemos formalizar o início do projeto?`;
+      (prop.monthly > 0 ? `🔄 *Mensalidade / Acompanhamento:* ${formatCurrency(prop.monthly)}/mês\n\n` : '\n') +
+      `🛡️ *Garantia:* Garantia e suporte prioritário inclusos.\n\n` +
+      `Podemos formalizar o início do atendimento?`;
 
     const encoded = encodeURIComponent(message);
     const waUrl = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
     window.open(waUrl, '_blank');
-    toast.success('Proposta enviada para o WhatsApp!');
+    toast.success('Proposta formatada enviada para o WhatsApp!');
   };
 
   // Copiar resumo
   const handleCopyProposalText = (prop: ProposalItem) => {
     const pixTotal = prop.total * (1 - prop.pixDiscountPercent / 100);
     const text = 
-      `PROPOSTA COMERCIAL WCTECH — ${prop.id}\n` +
+      `PROPOSTA COMERCIAL — ${prop.companyName || 'Nossa Empresa'}\n` +
+      `Código: ${prop.id}\n` +
       `Cliente: ${prop.client}\n` +
-      `Projeto: ${prop.title}\n` +
+      `Item / Projeto: ${prop.title}\n` +
       `Valor: ${formatCurrency(prop.total)} (À vista PIX: ${formatCurrency(pixTotal)})\n` +
       `Prazo: ${prop.deadline}\n` +
-      `Site: https://wctech.web.app/`;
+      `Vendedor: ${prop.seller}`;
     navigator.clipboard.writeText(text);
-    toast.success('Resumo da proposta copiado para a área de transferência!');
+    toast.success('Resumo da proposta copiado!');
   };
+
+  if (!isLoaded) {
+    return (
+      <div className="p-8 text-center text-muted-foreground animate-pulse text-xs">
+        Carregando propostas comerciais...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-8">
-      {/* Estilos específicos de impressão para garantir encaixe perfeito em 1 Página A4 */}
+      {/* Estilos específicos de impressão para 1 Página A4 */}
       <style jsx global>{`
         @media print {
           body * {
@@ -381,148 +446,221 @@ export default function ProposalsPage() {
       {/* Header Principal */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <FileText className="w-6 h-6 text-primary" />
-            Propostas Comerciais (One-Pager)
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Gere propostas de alta conversão em 1 página PDF com envio direto para o WhatsApp do cliente
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <FileText className="w-6 h-6 text-primary" />
+              Propostas Comerciais (One-Pager)
+            </h1>
+            <Badge variant="outline" className="text-xs bg-muted/60 text-muted-foreground border-border">
+              Universal para qualquer Comércio
+            </Badge>
+          </div>
+          <p className="text-muted-foreground text-xs mt-1">
+            Gere orçamentos e propostas comerciais profissionais em 1 página PDF com envio direto para o WhatsApp.
           </p>
         </div>
-        <Button onClick={() => setIsCreateModalOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm">
-          <Plus className="w-4 h-4 mr-2" />
-          Nova Proposta Comercial
-        </Button>
-      </div>
 
-      {/* Barra de Filtros e Busca */}
-      <div className="flex flex-col md:flex-row gap-3 bg-card p-3 rounded-xl border border-border items-center justify-between">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Buscar por cliente, código ou escopo..." 
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="pl-9 bg-background w-full" 
-          />
-        </div>
-        
-        <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 scrollbar-hide">
-          <select 
-            value={categoryFilter}
-            onChange={e => setCategoryFilter(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-xs font-semibold shadow-sm"
-          >
-            <option value="all">Todas as Categorias</option>
-            <option value="site">🌐 Sites & Presença Digital</option>
-            <option value="software">💻 Sistemas & Softwares</option>
-            <option value="automation">⚙️ Automação & Robô WhatsApp</option>
-            <option value="support">🛠️ Manutenção & Suporte</option>
-          </select>
+        <div className="flex flex-wrap items-center gap-2">
+          {proposals.length > 0 && (
+            <Button 
+              variant="outline" 
+              size="sm"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive text-xs h-9"
+              onClick={handleClearAllProposals}
+              title="Limpar todas as propostas cadastradas"
+            >
+              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+              Limpar Propostas
+            </Button>
+          )}
 
-          <select 
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-xs font-semibold shadow-sm"
+          <Button 
+            onClick={handleOpenCreateModal} 
+            className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold shadow-sm h-9"
           >
-            <option value="all">Todos os Status</option>
-            <option value="Criada">Criada</option>
-            <option value="Enviada">Enviada</option>
-            <option value="Visualizada">Visualizada</option>
-            <option value="Negociação">Negociação</option>
-            <option value="Aceita">Aceita</option>
-            <option value="Recusada">Recusada</option>
-          </select>
+            <Plus className="w-4 h-4 mr-1.5" />
+            Nova Proposta Comercial
+          </Button>
         </div>
       </div>
 
-      {/* Tabela de Propostas */}
-      <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs uppercase bg-accent/50 text-muted-foreground">
-              <tr>
-                <th className="px-6 py-4">Código</th>
-                <th className="px-6 py-4">Cliente & Projeto</th>
-                <th className="px-6 py-4">Categoria</th>
-                <th className="px-6 py-4">Valor Total</th>
-                <th className="px-6 py-4">Mensalidade</th>
-                <th className="px-6 py-4 text-center">Status</th>
-                <th className="px-6 py-4">Validade</th>
-                <th className="px-6 py-4 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProposals.map((prop) => {
-                const CatMeta = CATEGORY_DEFAULT_SCOPES[prop.category] || CATEGORY_DEFAULT_SCOPES.site;
-                const CatIcon = CatMeta.icon;
+      {/* Zero Examples / Empty State */}
+      {proposals.length === 0 ? (
+        <div className="bg-card rounded-2xl border border-dashed border-border p-12 text-center max-w-xl mx-auto my-8 shadow-sm">
+          <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary mx-auto mb-4">
+            <FileText className="w-7 h-7" />
+          </div>
+          <h3 className="text-lg font-bold text-foreground">Nenhuma proposta comercial cadastrada</h3>
+          <p className="text-xs text-muted-foreground mt-1.5 max-w-md mx-auto leading-relaxed">
+            Seu painel de propostas está 100% limpo. Crie orçamentos adaptáveis para qualquer tipo de negócio (comércio varejista, serviços, projetos ou planos recorrentes) sem informações desnecessárias.
+          </p>
+          <div className="mt-6 flex justify-center">
+            <Button 
+              onClick={handleOpenCreateModal}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs shadow-md h-10 px-5"
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              Criar Minha Primeira Proposta
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Barra de Filtros e Busca */}
+          <div className="flex flex-col md:flex-row gap-3 bg-card p-3 rounded-xl border border-border items-center justify-between">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input 
+                placeholder="Buscar por cliente, código ou título..." 
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="pl-9 bg-background w-full h-9 text-xs" 
+              />
+            </div>
+            
+            <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 scrollbar-hide">
+              <select 
+                value={categoryFilter}
+                onChange={e => setCategoryFilter(e.target.value)}
+                className="h-9 rounded-lg border border-border bg-background px-3 py-1 text-xs font-semibold text-foreground"
+              >
+                <option value="all">Todas as Categorias</option>
+                <option value="produtos">📦 Produtos & Mercadorias</option>
+                <option value="servicos">🛠️ Prestação de Serviços</option>
+                <option value="recorrencia">🔄 Planos / Mensalidade</option>
+                <option value="projetos">📋 Projetos & Obras</option>
+                <option value="geral">✨ Geral</option>
+              </select>
 
-                return (
-                  <tr key={prop.id} className="border-b border-border hover:bg-cardHover transition-colors">
-                    <td className="px-6 py-4 font-mono text-xs font-bold text-primary">{prop.id}</td>
-                    <td className="px-6 py-4">
-                      <div className="font-bold text-foreground hover:underline cursor-pointer" onClick={() => setActiveOnePager(prop)}>
-                        {prop.client}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{prop.title}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <CatIcon className="w-3.5 h-3.5 text-primary" />
-                        <span>{CatMeta.label.split('&')[0].trim()}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 font-semibold text-emerald-400">
-                      {prop.total > 0 ? formatCurrency(prop.total) : 'Sob Consulta'}
-                    </td>
-                    <td className="px-6 py-4 font-medium text-muted-foreground">
-                      {prop.monthly > 0 ? `${formatCurrency(prop.monthly)}/mês` : '—'}
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <Badge variant={prop.statusColor as any} className="text-xs py-0.5">
-                        {prop.status}
-                      </Badge>
-                    </td>
-                    <td className="px-6 py-4 text-xs text-muted-foreground">{prop.validUntil}</td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center gap-2 justify-end">
-                        {/* Ver Documento One-Pager */}
-                        <Button 
-                          onClick={() => setActiveOnePager(prop)} 
-                          size="sm"
-                          className="h-8 px-2.5 text-xs bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 font-semibold"
-                          title="Visualizar Proposta em 1 Página PDF"
-                        >
-                          <FileText className="w-3.5 h-3.5 mr-1" />
-                          One-Pager
-                        </Button>
+              <select 
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="h-9 rounded-lg border border-border bg-background px-3 py-1 text-xs font-semibold text-foreground"
+              >
+                <option value="all">Todos os Status</option>
+                <option value="Criada">Criada</option>
+                <option value="Enviada">Enviada</option>
+                <option value="Visualizada">Visualizada</option>
+                <option value="Negociação">Negociação</option>
+                <option value="Aceita">Aceita</option>
+                <option value="Recusada">Recusada</option>
+              </select>
+            </div>
+          </div>
 
-                        {/* Enviar no WhatsApp */}
-                        <Button 
-                          onClick={() => handleSendViaWhatsApp(prop)} 
-                          size="sm"
-                          className="h-8 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
-                          title="Enviar proposta pronta para o WhatsApp do cliente"
-                        >
-                          <Send className="w-3.5 h-3.5 mr-1" />
-                          WhatsApp
-                        </Button>
-                      </div>
-                    </td>
+          {/* Tabela de Propostas */}
+          <div className="bg-card rounded-2xl border border-border overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="text-[11px] uppercase bg-muted/40 text-muted-foreground border-b border-border font-bold">
+                  <tr>
+                    <th className="px-5 py-3">Código</th>
+                    <th className="px-5 py-3">Cliente & Proposta</th>
+                    <th className="px-5 py-3">Categoria</th>
+                    <th className="px-5 py-3">Valor Total</th>
+                    <th className="px-5 py-3">Mensalidade</th>
+                    <th className="px-5 py-3 text-center">Status</th>
+                    <th className="px-5 py-3">Validade</th>
+                    <th className="px-5 py-3 text-right">Ações</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div className="p-4 border-t border-border flex items-center justify-between text-xs text-muted-foreground bg-accent/30">
-          <span>Total de {filteredProposals.length} propostas registradas</span>
-          <span>Modelo de proposta padronizado pela WCTech</span>
-        </div>
-      </div>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {filteredProposals.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-6 py-10 text-center text-muted-foreground">
+                        <p className="text-xs">Nenhuma proposta encontrada para os filtros aplicados.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredProposals.map((prop) => {
+                      const CatMeta = CATEGORY_DEFAULT_SCOPES[prop.category] || CATEGORY_DEFAULT_SCOPES.geral;
+                      const CatIcon = CatMeta.icon;
+
+                      return (
+                        <tr key={prop.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-5 py-3.5 font-mono text-muted-foreground font-bold">
+                            {prop.id}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <div 
+                              className="font-bold text-foreground hover:text-primary cursor-pointer transition-colors" 
+                              onClick={() => setActiveOnePager(prop)}
+                            >
+                              {prop.client}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{prop.title}</div>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                              <CatIcon className="w-3.5 h-3.5 text-primary" />
+                              <span>{CatMeta.label.split('&')[0].trim()}</span>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 font-mono font-bold text-foreground">
+                            {prop.total > 0 ? formatCurrency(prop.total) : 'Sob Consulta'}
+                          </td>
+                          <td className="px-5 py-3.5 font-mono text-muted-foreground">
+                            {prop.monthly > 0 ? `${formatCurrency(prop.monthly)}/mês` : '—'}
+                          </td>
+                          <td className="px-5 py-3.5 text-center">
+                            <Badge variant={prop.statusColor as any} className="text-[10px]">
+                              {prop.status}
+                            </Badge>
+                          </td>
+                          <td className="px-5 py-3.5 text-muted-foreground">{prop.validUntil}</td>
+                          <td className="px-5 py-3.5 text-right">
+                            <div className="flex items-center gap-1.5 justify-end">
+                              {/* Ver Documento One-Pager */}
+                              <Button 
+                                onClick={() => setActiveOnePager(prop)} 
+                                size="sm"
+                                className="h-7 px-2 text-xs bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 font-semibold"
+                                title="Visualizar Proposta em 1 Página PDF"
+                              >
+                                <FileText className="w-3.5 h-3.5 mr-1" />
+                                One-Pager
+                              </Button>
+
+                              {/* Enviar no WhatsApp */}
+                              <Button 
+                                onClick={() => handleSendViaWhatsApp(prop)} 
+                                size="sm"
+                                className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                                title="Enviar proposta no WhatsApp"
+                              >
+                                <Send className="w-3.5 h-3.5 mr-1" />
+                                WhatsApp
+                              </Button>
+
+                              {/* Excluir Proposta */}
+                              <Button 
+                                onClick={(e) => handleDeleteProposal(prop.id, e)} 
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                title="Excluir Proposta"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="p-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground bg-muted/20">
+              <span>Total de {filteredProposals.length} propostas registradas</span>
+              <span>Visualização One-Pager otimizada para alta conversão</span>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ========================================================================= */}
-      {/* MODAL / VISUALIZADOR ONE-PAGER DE 1 PÁGINA (IMPRIMÍVEL EM PDF A4) */}
+      {/* MODAL ONE-PAGER IMPRIMÍVEL (1 PÁGINA A4) */}
       {/* ========================================================================= */}
       {activeOnePager && (
         <div 
@@ -534,9 +672,9 @@ export default function ProposalsPage() {
             className="bg-card w-full max-w-3xl rounded-2xl border border-border shadow-2xl overflow-hidden my-6 flex flex-col cursor-default"
           >
             {/* Barra Superior de Ações (Oculta na Impressão) */}
-            <div className="p-4 bg-accent/40 border-b border-border flex flex-wrap items-center justify-between gap-3 no-print">
+            <div className="p-4 bg-muted/40 border-b border-border flex flex-wrap items-center justify-between gap-3 no-print">
               <div className="flex items-center gap-2">
-                <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs font-mono font-bold">
+                <Badge className="bg-primary/10 text-primary border-primary/20 text-xs font-mono font-bold">
                   {activeOnePager.id}
                 </Badge>
                 <span className="text-sm font-semibold text-foreground truncate max-w-xs">
@@ -549,10 +687,10 @@ export default function ProposalsPage() {
                   onClick={handlePrintOnePager}
                   size="sm" 
                   className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold h-8"
-                  title="Gera o PDF de 1 página perfeitamente formatada em formato A4"
+                  title="Gera o PDF de 1 página A4"
                 >
                   <Printer className="w-3.5 h-3.5 mr-1.5" />
-                  Imprimir / PDF
+                  Imprimir / Salvar PDF
                 </Button>
 
                 <Button 
@@ -569,189 +707,150 @@ export default function ProposalsPage() {
                   size="sm" 
                   onClick={() => handleCopyProposalText(activeOnePager)}
                   className="text-xs h-8"
-                  title="Copiar texto de resumo"
+                  title="Copiar texto"
                 >
                   <Copy className="w-3.5 h-3.5 mr-1" />
                   Copiar
                 </Button>
 
                 <Button 
-                  variant="destructive" 
+                  variant="ghost" 
                   size="sm" 
                   onClick={() => setActiveOnePager(null)}
-                  className="h-8 px-3 text-xs font-bold gap-1 bg-red-600 hover:bg-red-700 text-white shadow-sm"
-                  title="Fechar Visualização (ESC)"
+                  className="h-8 px-2 text-xs"
                 >
                   <X className="w-4 h-4" />
-                  <span>Fechar (ESC)</span>
                 </Button>
               </div>
             </div>
 
-            {/* CORPO DO DOCUMENTO ONE-PAGER (Elemento Impresso com id: one-pager-printable) */}
+            {/* CORPO DO DOCUMENTO ONE-PAGER */}
             <div id="one-pager-printable" className="p-8 bg-card text-foreground space-y-6">
               {/* Cabeçalho da Proposta */}
               <div className="flex justify-between items-start border-b border-border pb-6 print-border">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-9 h-9 rounded-xl bg-primary/20 border border-primary/40 flex items-center justify-center font-black text-primary text-base">
-                      WC
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/40 flex items-center justify-center font-black text-primary text-base">
+                      <Store className="w-5 h-5" />
                     </div>
                     <div>
-                      <h2 className="text-xl font-black tracking-tight text-foreground print-text-dark">WCTech Soluções</h2>
-                      <p className="text-xs text-muted-foreground print-text-muted">Tecnologia, Desenvolvimento Web & Automação</p>
+                      <h2 className="text-xl font-black tracking-tight text-foreground print-text-dark">
+                        {activeOnePager.companyName || 'Proposta Comercial'}
+                      </h2>
+                      <p className="text-xs text-muted-foreground print-text-muted">
+                        {activeOnePager.companyDetails || 'Soluções Comerciais e Atendimento'}
+                      </p>
                     </div>
                   </div>
-                  <div className="mt-3 text-xs text-muted-foreground space-y-0.5 print-text-muted">
-                    <p>🌐 <strong>wctech.web.app</strong> • 📱 (92) 98108-7241</p>
-                    <p>Manaus - Amazonas • Atendimento para todo o Brasil</p>
-                  </div>
+                  {activeOnePager.companyPhone && (
+                    <div className="mt-2 text-xs text-muted-foreground print-text-muted">
+                      <p>📱 Contato: <strong>{activeOnePager.companyPhone}</strong></p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="text-right">
                   <span className="text-xs font-bold uppercase tracking-wider text-primary">Proposta Comercial</span>
                   <p className="text-xl font-mono font-black text-foreground print-text-dark">{activeOnePager.id}</p>
                   <div className="mt-2 text-xs text-muted-foreground space-y-0.5 print-text-muted">
-                    <p>Data de Emissão: <strong>{activeOnePager.date}</strong></p>
-                    <p>Válida até: <strong>{activeOnePager.validUntil}</strong></p>
+                    <p>Emissão: <strong>{activeOnePager.date}</strong></p>
+                    <p>Validade: <strong>{activeOnePager.validUntil}</strong></p>
                   </div>
                 </div>
               </div>
 
-              {/* Informações do Cliente & Projeto */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-accent/20 border border-border print-bg-subtle print-border">
+              {/* Informações do Cliente */}
+              <div className="p-4 rounded-xl bg-muted/40 border border-border print-bg-subtle print-border flex flex-col sm:flex-row justify-between gap-4">
                 <div>
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider print-text-muted">Apresentado Para:</span>
-                  <h3 className="text-base font-bold text-foreground mt-0.5 print-text-dark">{activeOnePager.client}</h3>
-                  <p className="text-xs text-muted-foreground print-text-muted">Aos cuidados de: <strong>{activeOnePager.clientContact || 'Responsável'}</strong></p>
+                  <span className="text-[10px] font-bold uppercase text-muted-foreground print-text-muted tracking-wider">Apresentado para:</span>
+                  <h3 className="text-base font-black text-foreground print-text-dark">{activeOnePager.client}</h3>
+                  {activeOnePager.clientContact && (
+                    <p className="text-xs text-muted-foreground print-text-muted">Aos cuidados de: <strong>{activeOnePager.clientContact}</strong></p>
+                  )}
                   {activeOnePager.clientPhone && (
                     <p className="text-xs text-muted-foreground print-text-muted">WhatsApp: {activeOnePager.clientPhone}</p>
                   )}
                 </div>
 
-                <div>
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider print-text-muted">Projeto Proposto:</span>
-                  <h3 className="text-base font-bold text-primary mt-0.5 print-text-dark">{activeOnePager.title}</h3>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground print-text-muted">
-                    <span>Prazo de Entrega: <strong>{activeOnePager.deadline}</strong></span>
-                    <span>•</span>
-                    <span>Consultor: <strong>{activeOnePager.seller}</strong></span>
-                  </div>
+                <div className="sm:text-right">
+                  <span className="text-[10px] font-bold uppercase text-muted-foreground print-text-muted tracking-wider">Atendimento:</span>
+                  <p className="text-xs text-foreground print-text-dark font-semibold">Responsável: <strong>{activeOnePager.seller}</strong></p>
+                  <p className="text-xs text-muted-foreground print-text-muted">Prazo: <strong>{activeOnePager.deadline}</strong></p>
                 </div>
               </div>
 
-              {/* Escopo de Entregáveis */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-bold uppercase tracking-wide text-foreground flex items-center gap-1.5 print-text-dark">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    Escopo Detalhado & Entregáveis
-                  </h4>
-                  <span className="text-xs text-muted-foreground print-text-muted">Incluso na Proposta</span>
+              {/* Objeto / Título da Proposta */}
+              <div>
+                <h4 className="text-sm font-bold text-foreground print-text-dark uppercase tracking-wider flex items-center gap-2 mb-2">
+                  <DollarSign className="w-4 h-4 text-primary" />
+                  Objeto da Proposta
+                </h4>
+                <div className="p-3.5 rounded-xl border border-border bg-card print-border">
+                  <p className="text-sm font-bold text-foreground print-text-dark">{activeOnePager.title}</p>
+                  {activeOnePager.notes && (
+                    <p className="text-xs text-muted-foreground print-text-muted mt-1 italic">{activeOnePager.notes}</p>
+                  )}
                 </div>
+              </div>
 
-                <div className="grid grid-cols-1 gap-2.5">
+              {/* Itens do Escopo */}
+              <div>
+                <h4 className="text-sm font-bold text-foreground print-text-dark uppercase tracking-wider flex items-center gap-2 mb-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  O que está incluso nesta proposta:
+                </h4>
+                <div className="grid grid-cols-1 gap-2">
                   {activeOnePager.scope.map((item, idx) => (
-                    <div key={idx} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-background/60 border border-border/80 print-bg-subtle print-border text-xs">
-                      <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
-                        <Check className="w-3 h-3" />
-                      </div>
-                      <span className="text-foreground/90 font-medium print-text-dark">{item}</span>
+                    <div key={idx} className="flex items-start gap-2.5 p-2 rounded-lg bg-muted/20 border border-border/60 print-border text-xs">
+                      <span className="w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0 font-bold text-[10px] mt-0.5">
+                        ✓
+                      </span>
+                      <span className="text-foreground print-text-dark">{item}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Tabela de Investimento & Condições de Pagamento */}
-              <div className="p-5 rounded-xl bg-accent/30 border border-border space-y-4 print-bg-subtle print-border">
-                <h4 className="text-sm font-bold uppercase tracking-wide text-foreground flex items-center gap-1.5 print-text-dark">
-                  <DollarSign className="w-4 h-4 text-primary" />
-                  Investimento & Condições Comerciais
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {/* À Vista com Desconto PIX */}
-                  <div className="p-3.5 rounded-lg bg-background border border-emerald-500/40 print-border">
-                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">À Vista no PIX ({activeOnePager.pixDiscountPercent}% OFF)</span>
-                    <p className="text-xl font-black text-emerald-400 mt-1">
-                      {formatCurrency(activeOnePager.total * (1 - activeOnePager.pixDiscountPercent / 100))}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 print-text-muted">Pagamento na aprovação / início</p>
+              {/* Valores & Condições de Pagamento */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <div className="p-4 rounded-xl border border-border bg-muted/30 print-border space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase text-muted-foreground print-text-muted tracking-wider">Investimento Total</span>
+                  <div className="text-2xl font-black text-foreground print-text-dark font-mono">
+                    {formatCurrency(activeOnePager.total)}
                   </div>
-
-                  {/* Parcelado no Cartão */}
-                  <div className="p-3.5 rounded-lg bg-background border border-border print-border">
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider print-text-muted">Parcelado sem Juros</span>
-                    <p className="text-xl font-black text-foreground mt-1 print-text-dark">
-                      {activeOnePager.installmentsCount}x de {formatCurrency(activeOnePager.total / activeOnePager.installmentsCount)}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 print-text-muted">Total: {formatCurrency(activeOnePager.total)}</p>
-                  </div>
-
-                  {/* Mensalidade / Manutenção */}
-                  <div className="p-3.5 rounded-lg bg-background border border-border print-border">
-                    <span className="text-[10px] font-bold text-primary uppercase tracking-wider">Suporte & Manutenção</span>
-                    <p className="text-xl font-black text-primary mt-1 print-text-dark">
-                      {activeOnePager.monthly > 0 ? `${formatCurrency(activeOnePager.monthly)}/mês` : 'Incluso no Setup'}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 print-text-muted">
-                      {activeOnePager.monthly > 0 ? 'Sem fidelidade contratual' : 'Garantia de 90 dias'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Termos de Garantia e Aceite */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-border print-border text-xs text-muted-foreground print-text-muted">
-                <div className="space-y-1">
-                  <h5 className="font-bold text-foreground flex items-center gap-1.5 print-text-dark">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    Garantia Técnica e Suporte WCTech
-                  </h5>
-                  <p>• Garantia completa de 90 dias para correções e ajustes sem custo adicional.</p>
-                  <p>• Treinamento e suporte direto com nossa equipe pelo WhatsApp.</p>
+                  <p className="text-xs text-muted-foreground print-text-muted">
+                    Em até <strong>{activeOnePager.installmentsCount}x sem juros</strong> no cartão
+                  </p>
+                  <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    À vista com {activeOnePager.pixDiscountPercent}% no PIX: {formatCurrency(activeOnePager.total * (1 - activeOnePager.pixDiscountPercent / 100))}
+                  </p>
                 </div>
 
-                <div className="text-right flex flex-col justify-end">
-                  <p className="font-semibold text-foreground print-text-dark">Aprovação e Início Imediato:</p>
-                  <p className="text-emerald-400 font-bold">📲 Responda "Proposta Aceita" pelo WhatsApp</p>
-                  <p className="text-[11px]">WCTech Soluções • Atendimento Especializado</p>
-                </div>
+                {activeOnePager.monthly > 0 && (
+                  <div className="p-4 rounded-xl border border-border bg-muted/30 print-border space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase text-muted-foreground print-text-muted tracking-wider">Mensalidade / Acompanhamento</span>
+                    <div className="text-2xl font-black text-primary print-text-dark font-mono">
+                      {formatCurrency(activeOnePager.monthly)}<span className="text-xs font-normal text-muted-foreground">/mês</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground print-text-muted">
+                      Suporte e acompanhamento contínuo
+                    </p>
+                  </div>
+                )}
               </div>
-            </div>
 
-            {/* Barra Inferior Fixa de Ações (Oculta na Impressão) */}
-            <div className="p-4 bg-accent/40 border-t border-border flex flex-wrap items-center justify-between gap-3 no-print">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <FileText className="w-4 h-4 text-primary" />
-                <span>Proposta comercial pronta para envio ou download em PDF</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setActiveOnePager(null)}
-                  className="text-xs h-9 px-4 font-bold border-border hover:bg-destructive hover:text-destructive-foreground hover:border-destructive transition-colors gap-1.5"
-                >
-                  <X className="w-4 h-4" />
-                  <span>Fechar Proposta</span>
-                </Button>
-                <Button 
-                  onClick={handlePrintOnePager}
-                  size="sm" 
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold h-9 gap-1.5"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Imprimir / PDF</span>
-                </Button>
-                <Button 
-                  onClick={() => handleSendViaWhatsApp(activeOnePager)}
-                  size="sm" 
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold h-9 gap-1.5"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>Enviar no WhatsApp</span>
-                </Button>
+              {/* Assinaturas */}
+              <div className="grid grid-cols-2 gap-8 pt-8 border-t border-border print-border text-center text-xs">
+                <div>
+                  <div className="border-b border-border print-border pb-8 mb-2" />
+                  <p className="font-bold text-foreground print-text-dark">{activeOnePager.companyName}</p>
+                  <p className="text-[11px] text-muted-foreground print-text-muted">{activeOnePager.seller}</p>
+                </div>
+                <div>
+                  <div className="border-b border-border print-border pb-8 mb-2" />
+                  <p className="font-bold text-foreground print-text-dark">{activeOnePager.client}</p>
+                  <p className="text-[11px] text-muted-foreground print-text-muted">{activeOnePager.clientContact || 'Aceite do Cliente'}</p>
+                </div>
               </div>
             </div>
           </div>
@@ -766,22 +865,53 @@ export default function ProposalsPage() {
           <div className="bg-card w-full max-w-xl rounded-2xl border border-border shadow-2xl p-6 space-y-4 my-6">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <h2 className="text-lg font-bold flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-primary" />
-                  Gerar Nova Proposta Comercial (One-Pager)
+                <h2 className="text-base font-bold text-foreground flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  Nova Proposta Comercial
                 </h2>
-                <p className="text-xs text-muted-foreground">Preencha os dados para gerar o documento PDF de 1 página automaticamente</p>
+                <p className="text-xs text-muted-foreground">Preencha os dados para gerar o documento PDF e envio no WhatsApp</p>
               </div>
               <Button variant="ghost" size="icon" onClick={() => setIsCreateModalOpen(false)}>
                 <X className="w-4 h-4" />
               </Button>
             </div>
 
-            {/* Seleção Rápida de Categoria */}
+            {/* Dados da Empresa Emissora (Universal) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3 rounded-xl bg-muted/30 border border-border">
+              <div>
+                <label className="text-[11px] font-semibold text-foreground">Sua Empresa</label>
+                <Input 
+                  placeholder="Nome da sua Empresa" 
+                  value={formCompany} 
+                  onChange={e => setFormCompany(e.target.value)}
+                  className="mt-1 h-8 text-xs bg-background" 
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-foreground">Vendedor / Responsável</label>
+                <Input 
+                  placeholder="Seu Nome" 
+                  value={formSeller} 
+                  onChange={e => setFormSeller(e.target.value)}
+                  className="mt-1 h-8 text-xs bg-background" 
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-foreground">Seu WhatsApp / Telefone</label>
+                <Input 
+                  placeholder="(00) 00000-0000" 
+                  value={formCompanyPhone} 
+                  onChange={e => setFormCompanyPhone(e.target.value)}
+                  className="mt-1 h-8 text-xs bg-background" 
+                />
+              </div>
+            </div>
+
+            {/* Seleção Rápida de Categoria Universal */}
             <div>
-              <label className="text-xs font-bold text-muted-foreground uppercase">Categoria do Serviço</label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1.5">
-                {(['site', 'software', 'automation', 'support'] as const).map(cat => {
+              <label className="text-xs font-semibold text-foreground">Tipo / Categoria de Atendimento</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1.5">
+                {(Object.keys(CATEGORY_DEFAULT_SCOPES) as ProposalCategory[]).map(cat => {
                   const isSelected = formCategory === cat;
                   const meta = CATEGORY_DEFAULT_SCOPES[cat];
                   const Icon = meta.icon;
@@ -790,14 +920,14 @@ export default function ProposalsPage() {
                       key={cat}
                       type="button"
                       onClick={() => handleCategoryChange(cat)}
-                      className={`p-2.5 rounded-xl border text-left transition-all flex flex-col items-center text-center gap-1.5 ${
+                      className={`p-2 rounded-xl border text-left transition-all flex items-center gap-2 ${
                         isSelected 
-                          ? 'bg-primary/15 border-primary text-primary font-bold shadow-sm' 
-                          : 'bg-background hover:bg-accent border-border text-muted-foreground'
+                          ? 'bg-primary/10 border-primary text-primary font-bold shadow-sm' 
+                          : 'bg-background hover:bg-muted/50 border-border text-muted-foreground'
                       }`}
                     >
-                      <Icon className={`w-5 h-5 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
-                      <span className="text-[11px] leading-tight">{meta.label.split('&')[0].trim()}</span>
+                      <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span className="text-[11px] leading-tight truncate">{meta.label.split('&')[0].trim()}</span>
                     </button>
                   );
                 })}
@@ -807,18 +937,18 @@ export default function ProposalsPage() {
             {/* Campos do Cliente */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-semibold text-muted-foreground">Nome da Empresa / Cliente *</label>
+                <label className="text-xs font-semibold text-foreground">Nome da Empresa / Cliente *</label>
                 <Input 
-                  placeholder="Ex: Auto Mecânica Modelo" 
+                  placeholder="Ex: Mercado Central, Drogaria Silva, etc." 
                   value={formClient} 
                   onChange={e => setFormClient(e.target.value)}
                   className="mt-1 h-9 text-xs" 
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-muted-foreground">Responsável / Contato</label>
+                <label className="text-xs font-semibold text-foreground">Contato / Responsável</label>
                 <Input 
-                  placeholder="Ex: Dr. Roberto Carlos" 
+                  placeholder="Ex: João Silva" 
                   value={formClientContact} 
                   onChange={e => setFormClientContact(e.target.value)}
                   className="mt-1 h-9 text-xs" 
@@ -828,7 +958,7 @@ export default function ProposalsPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-semibold text-muted-foreground">WhatsApp do Cliente (DDD + Número)</label>
+                <label className="text-xs font-semibold text-foreground">WhatsApp do Cliente</label>
                 <Input 
                   placeholder="Ex: 92981087241" 
                   value={formClientPhone} 
@@ -837,9 +967,9 @@ export default function ProposalsPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-muted-foreground">Prazo Estimado de Entrega</label>
+                <label className="text-xs font-semibold text-foreground">Prazo Estimado</label>
                 <Input 
-                  placeholder="Ex: 7 a 10 dias úteis" 
+                  placeholder="Ex: 3 a 5 dias úteis, Imediato, etc." 
                   value={formDeadline} 
                   onChange={e => setFormDeadline(e.target.value)}
                   className="mt-1 h-9 text-xs" 
@@ -848,9 +978,9 @@ export default function ProposalsPage() {
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-muted-foreground">Título Comercial do Projeto *</label>
+              <label className="text-xs font-semibold text-foreground">Título Comercial da Proposta *</label>
               <Input 
-                placeholder="Ex: Criação de Site + Sistema de Atendimento" 
+                placeholder="Título da proposta ou serviço" 
                 value={formTitle} 
                 onChange={e => setFormTitle(e.target.value)}
                 className="mt-1 h-9 text-xs font-semibold" 
@@ -860,21 +990,26 @@ export default function ProposalsPage() {
             {/* Itens do Escopo */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold text-muted-foreground uppercase">Itens Inclusos no Escopo ({formScope.length})</label>
-                <span className="text-[10px] text-muted-foreground">Clique no item para remover</span>
+                <label className="text-xs font-semibold text-foreground">Itens / Entregas Inclusas ({formScope.length})</label>
+                <span className="text-[10px] text-muted-foreground">Clique no X para remover</span>
               </div>
-              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+              <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
                 {formScope.map((item, idx) => (
                   <div 
                     key={idx} 
-                    onClick={() => handleToggleScopeItem(idx)}
-                    className="flex items-center justify-between p-1.5 px-2.5 rounded-lg bg-accent/30 hover:bg-destructive/10 border border-border text-xs cursor-pointer group transition-colors"
+                    className="flex items-center justify-between p-1.5 px-2.5 rounded-lg bg-muted/40 border border-border text-xs group"
                   >
                     <span className="truncate flex items-center gap-1.5">
-                      <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                      <Check className="w-3 h-3 text-emerald-500 shrink-0" />
                       {item}
                     </span>
-                    <X className="w-3 h-3 text-muted-foreground group-hover:text-destructive shrink-0 ml-2" />
+                    <button 
+                      type="button" 
+                      onClick={() => handleToggleScopeItem(idx)}
+                      className="text-muted-foreground hover:text-destructive shrink-0 ml-2"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -882,7 +1017,7 @@ export default function ProposalsPage() {
               {/* Adicionar novo item */}
               <div className="flex gap-2 mt-2">
                 <Input 
-                  placeholder="Adicionar novo item de escopo..." 
+                  placeholder="Digitar novo item de entrega / produto..." 
                   value={newScopeInput} 
                   onChange={e => setNewScopeInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleAddScopeItem())}
@@ -894,38 +1029,36 @@ export default function ProposalsPage() {
               </div>
             </div>
 
-            {/* Valores e Condições */}
-            <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-accent/20 border border-border">
+            {/* Valores */}
+            <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-muted/30 border border-border">
               <div>
-                <label className="text-xs font-semibold text-muted-foreground">Valor Total Setup (R$)</label>
+                <label className="text-xs font-semibold text-foreground">Valor Total (R$)</label>
                 <Input 
                   type="number" 
                   value={formTotal} 
                   onChange={e => setFormTotal(e.target.value)}
-                  placeholder="2500" 
-                  className="mt-1 h-9 text-xs font-bold text-emerald-400 bg-background" 
+                  placeholder="0.00" 
+                  className="mt-1 h-9 text-xs font-bold text-foreground bg-background" 
                 />
-                <span className="text-[10px] text-muted-foreground">PIX com 5% de desconto automático</span>
               </div>
               <div>
-                <label className="text-xs font-semibold text-muted-foreground">Suporte Mensal Opcional (R$)</label>
+                <label className="text-xs font-semibold text-foreground">Mensalidade (R$, Opcional)</label>
                 <Input 
                   type="number" 
                   value={formMonthly} 
                   onChange={e => setFormMonthly(e.target.value)}
-                  placeholder="120" 
-                  className="mt-1 h-9 text-xs font-semibold text-primary bg-background" 
+                  placeholder="0.00" 
+                  className="mt-1 h-9 text-xs font-semibold text-foreground bg-background" 
                 />
-                <span className="text-[10px] text-muted-foreground">Ou 0 se não houver mensalidade</span>
               </div>
             </div>
 
             {/* Botões do Rodapé */}
-            <div className="flex justify-end gap-2.5 pt-3 border-t border-border">
+            <div className="flex justify-end gap-2 pt-3 border-t border-border">
               <Button variant="outline" size="sm" onClick={() => setIsCreateModalOpen(false)}>
                 Cancelar
               </Button>
-              <Button onClick={handleSaveProposal} size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
+              <Button onClick={handleSaveProposal} size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold">
                 <FileText className="w-4 h-4 mr-1.5" />
                 Gerar Proposta One-Pager
               </Button>

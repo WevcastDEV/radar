@@ -7,6 +7,7 @@ import pino from 'pino';
 import * as QRCode from 'qrcode';
 import { WhatsappSafetyService } from './whatsapp-safety.service';
 import { withTyping } from './typing';
+import { convertToWhatsAppVoiceNote } from './audio-converter.util';
 
 interface UserSession {
   step: string;
@@ -151,8 +152,31 @@ export class WhatsappService implements OnModuleInit {
   private isConnecting = false;
   private reconnectTimeout?: NodeJS.Timeout;
 
-  // Gerenciador Multi-Sessão: isola o WhatsApp de cada computador/aparelho independentemente
+  // Gerenciador Multi-Sessão & Servidor Central:
+  // No modo PC Servidor, todas as máquinas da rede local compartilham a conexão ativa do WhatsApp
   private deviceSessions = new Map<string, DeviceSession>();
+
+  getActiveSession(): DeviceSession | null {
+    // 1. Procura sessão com WhatsApp conectado e socket ativo
+    for (const s of this.deviceSessions.values()) {
+      if (s.isConnected && s.sock) return s;
+    }
+    // 2. Procura sessão 'default' se estiver inicializada ou conectando
+    const def = this.deviceSessions.get('default');
+    if (def && (def.sock || def.isConnected || def.qrCode || def.isConnecting)) return def;
+
+    // 3. Procura qualquer sessão conectando ou com QR ativo
+    for (const s of this.deviceSessions.values()) {
+      if (s.isConnecting || s.qrCode) return s;
+    }
+
+    // 4. Procura qualquer sessão com credenciais salvas em disco
+    for (const s of this.deviceSessions.values()) {
+      if (fs.existsSync(path.join(s.authFolder, 'creds.json'))) return s;
+    }
+
+    return null;
+  }
 
   sanitizeDeviceId(rawDeviceId?: string): string {
     if (!rawDeviceId || typeof rawDeviceId !== 'string' || !rawDeviceId.trim()) {
@@ -162,79 +186,70 @@ export class WhatsappService implements OnModuleInit {
   }
 
   getSession(rawDeviceId?: string): DeviceSession {
+    // Modo Servidor Compartilhado: Se o PC Servidor já possui uma sessão conectada ou com credenciais salvas,
+    // todas as outras máquinas da rede (via IP) compartilham essa mesma conexão central do WhatsApp!
+    const active = this.getActiveSession();
+    if (active && (active.isConnected || active.sock)) {
+      return active;
+    }
+
     const deviceId = this.sanitizeDeviceId(rawDeviceId);
     let session = this.deviceSessions.get(deviceId);
 
-    // 1. Se a sessão solicitada já existe e está conectada, usa diretamente
-    if (session && session.isConnected && session.sock) {
-      return session;
-    }
-
-    // 2. Se a sessão solicitada não está conectada, procura se existe QUALQUER outra sessão no sistema que já esteja CONECTADA
-    for (const [id, active] of this.deviceSessions.entries()) {
-      if (active.isConnected && active.sock) {
-        return active;
-      }
-    }
-
-    // 3. Se a sessão solicitada já existe na memória, usa ela diretamente
+    // Se a sessão solicitada já existe na memória, usa diretamente
     if (session) {
       return session;
     }
 
-    // 4. Se a sessão não existe ainda, mas alguma outra sessão já tem QR Code ativo pronto
-    for (const [id, active] of this.deviceSessions.entries()) {
-      if (active.qrCode) {
-        return active;
-      }
+    // Se temos uma sessão ativa (mesmo reconectando), utiliza-a para evitar sessões fantasmas
+    if (active) {
+      return active;
     }
 
-    if (!session) {
-      const authFolder = deviceId === 'default'
-        ? path.join(process.cwd(), 'auth_info_baileys')
-        : path.join(process.cwd(), 'auth_info_baileys', deviceId);
+    const authFolder = deviceId === 'default'
+      ? path.join(process.cwd(), 'auth_info_baileys')
+      : path.join(process.cwd(), 'auth_info_baileys', deviceId);
 
-      if (!fs.existsSync(authFolder)) {
-        try { fs.mkdirSync(authFolder, { recursive: true }); } catch {}
-      }
-
-      session = {
-        deviceId,
-        authFolder,
-        sock: deviceId === 'default' ? this.sock : undefined,
-        qrCode: deviceId === 'default' ? this.qrCode : null,
-        rawQrCode: deviceId === 'default' ? this.rawQrCode : null,
-        isConnected: deviceId === 'default' ? this.isConnected : false,
-        isConnecting: deviceId === 'default' ? this.isConnecting : false,
-        reconnectTimeout: undefined,
-        isAutoReplyEnabled: true,
-        isCordialityEnabled: true,
-        contactsMap: new Map(),
-        hotLeadReplies: [],
-        userSessions: new Map(),
-        queue: {
-          isRunning: false,
-          isPaused: false,
-          leads: [],
-          currentIndex: 0,
-          intervalSeconds: 240,
-          batchSize: 5,
-          batchPauseMinutes: 30,
-          sentInBatch: 0,
-          currentBatch: 1,
-          totalBatches: 1,
-          countdown: 0,
-          isBatchResting: false,
-          batchRestCountdown: 0,
-          skipBatchRest: false,
-          skipCountdown: false,
-          nextLead: null,
-          lastError: null,
-          lastDispatchResult: null,
-        },
-      };
-      this.deviceSessions.set(deviceId, session);
+    if (!fs.existsSync(authFolder)) {
+      try { fs.mkdirSync(authFolder, { recursive: true }); } catch {}
     }
+
+    session = {
+      deviceId,
+      authFolder,
+      sock: undefined,
+      qrCode: null,
+      rawQrCode: null,
+      isConnected: false,
+      isConnecting: false,
+      reconnectTimeout: undefined,
+      isAutoReplyEnabled: this.isAutoReplyEnabled,
+      isCordialityEnabled: true,
+      contactsMap: new Map(),
+      hotLeadReplies: [],
+      userSessions: new Map(),
+      queue: {
+        isRunning: false,
+        isPaused: false,
+        leads: [],
+        currentIndex: 0,
+        intervalSeconds: 240,
+        batchSize: 5,
+        batchPauseMinutes: 30,
+        sentInBatch: 0,
+        currentBatch: 1,
+        totalBatches: 1,
+        countdown: 0,
+        isBatchResting: false,
+        batchRestCountdown: 0,
+        skipBatchRest: false,
+        skipCountdown: false,
+        nextLead: null,
+        lastError: null,
+        lastDispatchResult: null,
+      },
+    };
+    this.deviceSessions.set(deviceId, session);
 
     return session;
   }
@@ -293,6 +308,12 @@ export class WhatsappService implements OnModuleInit {
   // IDs das mensagens enviadas pelo próprio robô (para não confundir com digitação manual do Weverton)
   private botSentMessageIds = new Set<string>();
 
+  // 🛡️ Cache de IDs de mensagens já processadas para blindagem total contra re-emissões do Baileys
+  private processedMessageIds = new Set<string>();
+
+  // ⏱️ Timestamp da última resposta do robô por conversa para debounce e prevenção de respostas duplas
+  private lastBotReplyTimestampPerChat = new Map<string, number>();
+
   // Registro permanente de telefones de clientes já atendidos, contatados ou que interagiram
   
   // Lista de Respostas Recentes de Leads ("Leads Quentes")
@@ -301,11 +322,11 @@ export class WhatsappService implements OnModuleInit {
   // Configuração do Pré-Vendedor SDR Inteligente de Custo Zero (Multi-Nicho)
   private sdrConfig: SdrConfig = {
     enabled: true,
-    businessName: 'WCTech',
-    businessNiche: 'Criação de Sites, Sistemas e Automação',
+    businessName: 'CRIART BRASIL',
+    businessNiche: 'Comunicação Visual e Soluções Comerciais',
     intentResponses: {
       price: '{Olá|Oi|Tudo bem?}! Ficamos muito felizes com seu interesse. Nossos valores variam de acordo com a complexidade e necessidade da sua empresa. Para te passarmos uma proposta exata e sem compromisso, você prefere que nosso especialista te ligue ou podemos enviar nossa tabela completa em PDF por aqui?',
-      interested: '{Perfeito|Excelente|Muito obrigado pelo retorno!}! Preparamos um catálogo com nossas principais soluções e condições especiais. Você também pode conferir nossos projetos e avaliações no site oficial: https://wctech.web.app/ . Qual seria o melhor dia ou horário para conversarmos?',
+      interested: '{Perfeito|Excelente|Muito obrigado pelo retorno!}! Preparamos um catálogo com nossas principais soluções e condições especiais. Qual seria o melhor dia ou horário para conversarmos?',
       moreInfo: '{Com certeza|Perfeito!}! Desenvolvemos soluções sob medida focadas em gerar resultados, atrair clientes e simplificar sua rotina. Me conte brevemente: qual é o principal objetivo ou desafio da sua empresa no momento?',
       human: '{Com certeza|Entendido!}! Já notifiquei nosso especialista e ele assumirá a conversa com você aqui neste chat em instantes. Por favor, aguarde só um momento!',
       notInterested: '{Compreendo perfeitamente|Muito obrigado pela atenção!}! Caso precise no futuro, nossos canais continuam abertos. Desejamos muito sucesso para você e sua empresa!',
@@ -407,26 +428,25 @@ export class WhatsappService implements OnModuleInit {
     this.loadAttendedPhones();
     this.loadHotLeads();
     this.loadSdrConfig();
+    if (this.botFlowService?.getActiveFlow()) { this.isAutoReplyEnabled = true; }
     this.logger.log('Inicializando motor do WhatsApp automaticamente...');
     setTimeout(() => {
-      // 1. Procura se existe alguma sessão com credenciais válidas salva em auth_info_baileys
-      let savedDeviceId: string | null = null;
+      // 1. Procura todas as sessões com credenciais válidas salvas em auth_info_baileys
+      const savedDeviceIds = new Set<string>();
       try {
         const baseDir = path.join(process.cwd(), 'auth_info_baileys');
         if (fs.existsSync(baseDir)) {
           // Verifica primeiro na raiz
           if (fs.existsSync(path.join(baseDir, 'creds.json'))) {
-            savedDeviceId = 'default';
-          } else {
-            // Verifica nos subdiretórios
-            const items = fs.readdirSync(baseDir, { withFileTypes: true });
-            for (const item of items) {
-              if (item.isDirectory()) {
-                const credsFile = path.join(baseDir, item.name, 'creds.json');
-                if (fs.existsSync(credsFile)) {
-                  savedDeviceId = item.name;
-                  break;
-                }
+            savedDeviceIds.add('default');
+          }
+          // Verifica nos subdiretórios
+          const items = fs.readdirSync(baseDir, { withFileTypes: true });
+          for (const item of items) {
+            if (item.isDirectory()) {
+              const credsFile = path.join(baseDir, item.name, 'creds.json');
+              if (fs.existsSync(credsFile)) {
+                savedDeviceIds.add(item.name);
               }
             }
           }
@@ -435,11 +455,13 @@ export class WhatsappService implements OnModuleInit {
         this.logger.warn(`Erro ao verificar sessões salvas: ${err?.message}`);
       }
 
-      if (savedDeviceId) {
-        this.logger.log(`🔄 Restaurando conexão salva do WhatsApp [${savedDeviceId}]...`);
-        this.connectToWhatsApp(false, savedDeviceId).catch((err) => {
-          this.logger.warn(`Erro ao restaurar conexão do WhatsApp: ${err?.message}`);
-        });
+      if (savedDeviceIds.size > 0) {
+        for (const sessId of savedDeviceIds) {
+          this.logger.log(`🔄 Restaurando conexão salva do WhatsApp [${sessId}]...`);
+          this.connectToWhatsApp(false, sessId).catch((err) => {
+            this.logger.warn(`Erro ao restaurar conexão do WhatsApp [${sessId}]: ${err?.message}`);
+          });
+        }
       } else {
         this.logger.log('📱 Nenhuma sessão salva encontrada. Inicializando motor padrão para leitura de QR Code...');
         this.connectToWhatsApp(false, 'default').catch((err) => {
@@ -476,12 +498,8 @@ export class WhatsappService implements OnModuleInit {
     try {
       const session = this.getSession(rawDeviceId);
       this.safeClearAuthFolder(session.authFolder);
-      if (rawDeviceId !== 'default') {
-        const defaultFolder = path.join(process.cwd(), 'auth_info_baileys');
-        this.safeClearAuthFolder(defaultFolder);
-      }
     } catch (e: any) {
-      this.logger.error(`Erro ao limpar pasta auth_info_baileys: ${e?.message}`);
+      this.logger.error(`Erro ao limpar pasta auth_info_baileys para [${rawDeviceId}]: ${e?.message}`);
     }
   }
 
@@ -775,6 +793,21 @@ export class WhatsappService implements OnModuleInit {
         }
       });
 
+      // Monitoramento de atualizações e revogações de mensagens no WhatsApp
+      socket.ev.on('messages.update', (updates: any) => {
+        if (!Array.isArray(updates)) return;
+        for (const update of updates) {
+          if (update.update?.message === null) {
+            const remoteJid = update.key?.remoteJid;
+            const msgId = update.key?.id;
+            if (remoteJid && msgId) {
+              this.logger.log(`🗑️ Mensagem revogada detectada via messages.update: "${msgId}" de "${remoteJid}"`);
+              this.conversationBrain?.deleteMessage(remoteJid, msgId, true);
+            }
+          }
+        }
+      });
+
       // Regras Automáticas do Bot e Monitoramento de Intervenção Humana
       socket.ev.on('messages.upsert', async (event: any) => {
         for (const msg of event.messages || []) {
@@ -782,6 +815,19 @@ export class WhatsappService implements OnModuleInit {
           const jid = msg.key.remoteJid;
           // BLINDAGEM ABSOLUTA: Descartar grupos (@g.us), canais (@newsletter), transmissões (@broadcast) ou mensagens em grupo com participant
           if (!jid || isGroupOrBroadcastJid(jid) || msg.key.participant) continue;
+
+          // Verificação de revogação/exclusão enviada pelo WhatsApp (ProtocolMessage type 0 = REVOKE)
+          const protocolMessage = msg.message?.protocolMessage;
+          if (protocolMessage && (protocolMessage.type === 0 || protocolMessage.type === 'REVOKE')) {
+            const revokedId = protocolMessage.key?.id;
+            const sender = msg.key?.remoteJid || protocolMessage.key?.remoteJid;
+            if (revokedId && sender) {
+              this.logger.log(`🗑️ Protocolo REVOKE recebido do WhatsApp para mensagem "${revokedId}"`);
+              this.conversationBrain?.deleteMessage(sender, revokedId, true);
+            }
+            continue;
+          }
+
           try {
             await this.handleIncomingMessage(msg, event.type, session);
           } catch (err: any) {
@@ -836,7 +882,26 @@ export class WhatsappService implements OnModuleInit {
 
       // Extrai texto limpo de qualquer encapsulamento Baileys (ephemeral, viewOnce, button, text, etc.)
       const text = this.extractBaileysText(msg).trim();
-      const pushName = msg.pushName || '';
+      const contactInfo = deviceSession?.contactsMap?.get(senderId) || this.contactsMap.get(senderId);
+      const pushName = msg.pushName || contactInfo?.name || contactInfo?.notify || '';
+
+      // Se a mensagem já foi apagada no banco anteriormente, descarta e nunca ressuscita
+      const baileysMsgId = msg.key?.id;
+      if (baileysMsgId && this.conversationBrain?.isMessageDeleted(baileysMsgId)) {
+        return;
+      }
+
+      // 🛡️ DEDUPLICAÇÃO DE EVENTOS BAILEYS: Se a mensagem já foi processada, descarta imediatamente (evita re-processar na reconexão/sync)
+      if (baileysMsgId) {
+        if (this.processedMessageIds.has(baileysMsgId)) {
+          return;
+        }
+        this.processedMessageIds.add(baileysMsgId);
+        if (this.processedMessageIds.size > 3000) {
+          const first = this.processedMessageIds.values().next().value;
+          if (first) this.processedMessageIds.delete(first);
+        }
+      }
 
       // Se a mensagem partiu do próprio Weverton / do seu aparelho WhatsApp (celular, web, desktop ou painel):
       if (msg.key?.fromMe) {
@@ -847,7 +912,7 @@ export class WhatsappService implements OnModuleInit {
         const targetId = msg.key.remoteJid;
         if (targetId && !isGroupOrBroadcastJid(targetId) && !msg.key?.participant) {
           // Não silencia o número de teste do operador para permitir testes
-          if (!this.isTestNumber(targetId)) {
+          if (true) {
             const msgTs = Number(msg.messageTimestamp) * 1000;
             // Intervenção humana para qualquer mensagem recente (últimos 3 min) ou evento ao vivo (notify):
             const isRecent = !msgTs || eventType === 'notify' || Math.abs(Date.now() - msgTs) < 180000;
@@ -857,7 +922,7 @@ export class WhatsappService implements OnModuleInit {
             }
           }
           if (text) {
-            try { this.conversationBrain?.recordHumanMessage(targetId, text); } catch {}
+            try { this.conversationBrain?.recordHumanMessage(targetId, text, undefined, undefined, baileysMsgId); } catch {}
           }
         }
         return;
@@ -876,7 +941,7 @@ export class WhatsappService implements OnModuleInit {
 
       // 💾 Gravação estruturada da mensagem no Banco de Dados de Conversas e Contatos
       try {
-        this.conversationBrain?.recordClientMessage(senderId, text, pushName, matchedRecord);
+        this.conversationBrain?.recordClientMessage(senderId, text, pushName, matchedRecord, undefined, undefined, baileysMsgId);
       } catch (err: any) {
         this.logger.warn(`Erro no registro do banco de conversas: ${err?.message}`);
       }
@@ -903,7 +968,7 @@ export class WhatsappService implements OnModuleInit {
       }
 
       const isAutoReplyActive = deviceSession ? deviceSession.isAutoReplyEnabled : this.isAutoReplyEnabled;
-      if (!isAutoReplyActive) return;
+      if (!isAutoReplyActive || !this.botFlowService?.isBotActive()) return;
 
       // Registra que o contato interagiu para proteger contra re-disparos frios
       this.registerAttendedPhone(senderId, pushName ? `Cliente Respondeu no WhatsApp (${pushName})` : 'Cliente Respondeu no WhatsApp');
@@ -913,7 +978,7 @@ export class WhatsappService implements OnModuleInit {
 
       if (isTest) {
         // Limpa travas para que os testes do operador sempre conversem imediatamente
-        this.humanHandledChats.delete(senderId);
+        if (!this.isHumanHandled(senderId)) { this.humanHandledChats.delete(senderId); }
         const cleanD = senderId.split('@')[0].replace(/\D/g, '');
         if (cleanD) this.humanHandledChats.delete(cleanD);
         const tS = this.userSessions.get(senderId);
@@ -957,14 +1022,22 @@ export class WhatsappService implements OnModuleInit {
         }
       }
 
-      // 🤫 Filtro de Intervenção Humana: Se Weverton interagiu manualmente com este contato, o robô NÃO deve escrever mais!
-      if (!isTest && this.isHumanHandled(senderId)) {
-        this.logger.log(`🤫 [Silêncio Humano Ativo] Conversa com "${pushName || senderId}" está sob atendimento de Weverton. Robô não responderá.`);
+      // 🤫 Filtro de Intervenção Humana: Se o atendente interagiu manualmente com este contato, o robô NÃO deve escrever mais!
+      if (this.isHumanHandled(senderId)) {
+        this.logger.log(`🤫 [Silêncio Humano Ativo] Conversa com "${pushName || senderId}" está sob atendimento humano. Robô não responderá.`);
+        return;
+      }
+
+      // ⏱️ Anti-flood / Debounce: Se o robô já respondeu este contato há menos de 3.5 segundos, aguarda estabilizar
+      const lastReply = this.lastBotReplyTimestampPerChat.get(senderId) || 
+                        (rawNumber ? this.lastBotReplyTimestampPerChat.get(rawNumber) : undefined);
+      if (lastReply && (Date.now() - lastReply) < 3500) {
+        this.logger.log(`⏳ [Debounce Bot] Mensagem de "${senderId}" recebida em menos de 3.5s da última resposta do bot. Suprimindo duplicação.`);
         return;
       }
 
       this.logger.log(`🤖 Atendimento automático iniciado para ${senderId} (Identificado como Cliente).`);
-      await this.handleBotLogic(senderId, text, pushName, matchedRecord);
+      await this.handleBotLogic(senderId, text, pushName, matchedRecord, deviceSession);
   }
 
   // 🛡️ Reconhecimento Robusto de Desinteresse e Recusa (Fast-Exit Shield)
@@ -1050,7 +1123,7 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
-  private async handleBotLogic(senderId: string, text: string, pushName?: string, matchedRecord?: any) {
+  private async handleBotLogic(senderId: string, text: string, pushName?: string, matchedRecord?: any, deviceSession?: DeviceSession) {
     const trimmed = text.trim();
     const normalized = trimmed
       .normalize('NFD')
@@ -1096,13 +1169,13 @@ export class WhatsappService implements OnModuleInit {
     if (activeFlow && activeFlow.steps && activeFlow.steps.length > 0) {
       const flowResult = this.botFlowService.processMessage(senderId, text, matchedRecord);
       if (flowResult && flowResult.reply) {
-        await this.sendMessage(senderId, flowResult.reply, undefined, 'service');
+        await this.sendMessage(senderId, flowResult.reply, undefined, 'service', deviceSession?.deviceId);
         try {
           this.conversationBrain?.recordBotReply(senderId, flowResult.reply, flowResult.stepTitle, flowResult.action);
         } catch {}
         this.logger.log(`🌿 [FLUXO: ${activeFlow.name}] Resposta enviada para ${senderId} (Etapa: "${flowResult.stepTitle || 'Etapa'}")`);
 
-        if (flowResult.action === 'transfer_human' && !this.isTestNumber(senderId)) {
+        if (flowResult.action === 'transfer_human' || flowResult.isEnd) {
           this.registerHumanIntervention(senderId);
           this.logger.log(`🤝 [Transferência Humana] Cliente ${senderId} encaminhado para o atendente.`);
         }
@@ -1135,7 +1208,7 @@ export class WhatsappService implements OnModuleInit {
     if (this.conversationBrain) {
       const brainResult = this.conversationBrain.processConversationalReply(senderId, text, matchedRecord?.leadName || pushName);
       if (brainResult && brainResult.reply) {
-        await this.sendMessage(senderId, brainResult.reply, undefined, 'service');
+        await this.sendMessage(senderId, brainResult.reply, undefined, 'service', deviceSession?.deviceId);
         try {
           this.conversationBrain.recordBotReply(senderId, brainResult.reply, brainResult.intent || 'brain', brainResult.action);
         } catch {}
@@ -1177,7 +1250,7 @@ export class WhatsappService implements OnModuleInit {
         )
       : `Olá! Recebi sua mensagem. Como posso te ajudar? Digite *menu* para ver as opções disponíveis ou me conte o que você precisa.`;
 
-    await this.sendMessage(senderId, fallbackReply, undefined, 'service');
+    await this.sendMessage(senderId, fallbackReply, undefined, 'service', deviceSession?.deviceId);
     try {
       this.conversationBrain?.recordBotReply(senderId, fallbackReply, 'acolhimento_cliente');
     } catch {}
@@ -1228,12 +1301,14 @@ export class WhatsappService implements OnModuleInit {
   private checkSafetyGate(rawDeviceId?: string): string | null {
     this.refreshRateLimitCounters();
     const session = this.getSession(rawDeviceId);
+    const defaultSession = this.deviceSessions.get('default');
+    const activeSession = session.isConnected ? session : (defaultSession?.isConnected ? defaultSession : session);
 
-    if (!session.isConnected) {
+    if (!activeSession.isConnected) {
       return 'WhatsApp não conectado';
     }
 
-    const warmupComplete = session.connectionTimestamp ? (Date.now() - session.connectionTimestamp >= this.WARMUP_DELAY_MS) : true;
+    const warmupComplete = activeSession.connectionTimestamp ? (Date.now() - activeSession.connectionTimestamp >= this.WARMUP_DELAY_MS) : true;
     if (!warmupComplete) {
       const remaining = Math.ceil((this.WARMUP_DELAY_MS - (Date.now() - (session.connectionTimestamp || 0))) / 1000);
       return `Warm-up ativo: aguarde mais ${remaining}s após conexão`;
@@ -1286,27 +1361,42 @@ export class WhatsappService implements OnModuleInit {
   // Obter Status, QR Code e Status do Robô Automático
   getStatus(rawDeviceId?: string) {
     this.refreshRateLimitCounters();
-    const session = this.getSession(rawDeviceId);
+    const activeSession = this.getActiveSession();
+    const session = activeSession || this.getSession(rawDeviceId);
 
     if (!session.isConnected && !session.sock && !session.isConnecting && !session.qrCode) {
       this.logger.log(`📱 [${session.deviceId}] Não pareado e sem QR Code ativo. Disparando geração de QR Code...`);
       this.connectToWhatsApp(false, session.deviceId).catch(() => {});
     }
 
-    const defaultSession = this.deviceSessions.get('default');
-    const isConnected = session.isConnected || (defaultSession?.isConnected ?? false);
-    const qrCode = isConnected ? null : (session.qrCode || defaultSession?.qrCode || this.qrCode || null);
-    const rawQrCode = isConnected ? null : (session.rawQrCode || defaultSession?.rawQrCode || this.rawQrCode || null);
+    const isConnected = session.isConnected || Boolean(activeSession?.isConnected);
+    const targetSession = (activeSession?.isConnected ? activeSession : session);
+    const qrCode = isConnected ? null : (session.qrCode || targetSession.qrCode || this.qrCode || null);
+    const rawQrCode = isConnected ? null : (session.rawQrCode || targetSession.rawQrCode || this.rawQrCode || null);
+    const activeFlow = this.botFlowService?.getActiveFlow() || null;
+
+    let phone: string | null = null;
+    let pushName: string | null = null;
+    if (targetSession?.sock?.user) {
+      const u = targetSession.sock.user;
+      phone = (u.id || '').split(':')[0].split('@')[0] || null;
+      pushName = (u as any).name || (u as any).notify || null;
+    }
 
     return {
-      deviceId: session.deviceId,
+      deviceId: targetSession.deviceId,
       connected: isConnected,
+      phone,
+      pushName,
       qrCode,
       rawQrCode,
-      isConnecting: isConnected ? false : (session.isConnecting || (defaultSession?.isConnecting ?? false)),
-      autoReplyEnabled: session.isAutoReplyEnabled,
-      cordialityEnabled: session.isCordialityEnabled,
-      queue: this.getQueueStatus(session.deviceId),
+      isConnecting: isConnected ? false : (targetSession.isConnecting || false),
+      autoReplyEnabled: targetSession.isAutoReplyEnabled,
+      isFlowActive: Boolean(targetSession.isAutoReplyEnabled && activeFlow?.steps?.length),
+      activeFlowId: activeFlow?.id || null,
+      activeFlow,
+      cordialityEnabled: targetSession.isCordialityEnabled,
+      queue: this.getQueueStatus(targetSession.deviceId),
       // 🛡️ Métricas de Segurança Anti-Ban
       antiBan: {
         dailySent: this.dailySendCount,
@@ -1314,13 +1404,21 @@ export class WhatsappService implements OnModuleInit {
         hourlySent: this.hourlySendCount,
         hourlyLimit: this.HOURLY_LIMIT,
         isWithinSafeHours: this.isWithinSafeHours(),
-        isWarmupComplete: session.connectionTimestamp ? (Date.now() - session.connectionTimestamp >= this.WARMUP_DELAY_MS) : true,
-        safetyGate: this.checkSafetyGate(session.deviceId),
+        isWarmupComplete: targetSession.connectionTimestamp ? (Date.now() - targetSession.connectionTimestamp >= this.WARMUP_DELAY_MS) : true,
+        safetyGate: this.checkSafetyGate(targetSession.deviceId),
       },
     };
   }
 
   setAutoReplyEnabled(enabled: boolean, rawDeviceId?: string) {
+    if (!rawDeviceId || rawDeviceId === 'universal' || rawDeviceId === 'all') {
+      this.isAutoReplyEnabled = enabled;
+      for (const s of this.deviceSessions.values()) {
+        s.isAutoReplyEnabled = enabled;
+      }
+      this.logger.log(`🤖 Robô Universal de Atendimento ${enabled ? 'ATIVADO' : 'DESATIVADO'} para todos os aparelhos.`);
+      return { autoReplyEnabled: enabled, universal: true };
+    }
     const session = this.getSession(rawDeviceId);
     session.isAutoReplyEnabled = enabled;
     if (session.deviceId === 'default') this.isAutoReplyEnabled = enabled;
@@ -1693,7 +1791,7 @@ export class WhatsappService implements OnModuleInit {
   }
 
   async resetAndGenerateQr(rawDeviceId?: string): Promise<{ success: boolean; message: string; qrCode: string | null }> {
-    const session = this.getSession(rawDeviceId);
+    const session = this.getActiveSession() || this.getSession(rawDeviceId);
     this.logger.log(`⚡ [${session.deviceId}] FORÇANDO RESET DEFINITIVO DE CONEXÃO & GERAÇÃO DE NOVO QR CODE...`);
 
     // 1. Limpa timeouts pendentes
@@ -1763,7 +1861,7 @@ export class WhatsappService implements OnModuleInit {
       return this.resetAndGenerateQr(rawDeviceId);
     }
 
-    const session = this.getSession(rawDeviceId);
+    const session = this.getActiveSession() || this.getSession(rawDeviceId);
     this.logger.log(`🔄 [${session.deviceId}] Solicitada reconexão do WhatsApp (sem limpar credenciais)...`);
 
     if (session.reconnectTimeout) {
@@ -1796,7 +1894,7 @@ export class WhatsappService implements OnModuleInit {
   }
 
   async disconnect(rawDeviceId?: string) {
-    const session = this.getSession(rawDeviceId);
+    const session = this.getActiveSession() || this.getSession(rawDeviceId);
     this.logger.log(`🔌 [${session.deviceId}] Desconectando WhatsApp e despareando aparelho...`);
     if (session.reconnectTimeout) {
       clearTimeout(session.reconnectTimeout);
@@ -1911,10 +2009,24 @@ export class WhatsappService implements OnModuleInit {
     text: string, 
     imageBase64OrUrl?: string, 
     purpose: 'marketing' | 'service' = 'marketing',
-    rawDeviceId?: string
-  ): Promise<{ success: boolean; message: string; jid?: string; isLandline?: boolean; hasWhatsApp?: boolean }> {
-    const session = this.getSession(rawDeviceId);
-    if (this.sendInProgress) return { success: false, message: 'SEND_BUSY: aguarde o envio em andamento.' };
+    rawDeviceId?: string,
+    audioBase64?: string
+  ): Promise<{ success: boolean; message: string; jid?: string; isLandline?: boolean; hasWhatsApp?: boolean; messageId?: string }> {
+    let session = this.getSession(rawDeviceId);
+    if (!session.sock || !session.isConnected) {
+      const def = this.deviceSessions.get('default');
+      if (def && def.sock && def.isConnected) {
+        session = def;
+      } else {
+        for (const [_, s] of this.deviceSessions.entries()) {
+          if (s.sock && s.isConnected) {
+            session = s;
+            break;
+          }
+        }
+      }
+    }
+    if (purpose === 'marketing' && this.sendInProgress) return { success: false, message: 'SEND_BUSY: aguarde o envio em andamento.' };
     if (!session.sock || !session.isConnected) return { success: false, message: 'CHANNEL_DISCONNECTED: conecte o canal no painel.' };
     if (!to || typeof to !== 'string' || !to.trim()) {
       return { success: false, message: 'INVALID_RECIPIENT: informe um número de telefone válido.' };
@@ -1927,7 +2039,7 @@ export class WhatsappService implements OnModuleInit {
         message: 'ENVIO_BLOQUEADO: Robô 100% blindado contra envios para grupos de WhatsApp, canais ou transmissões.' 
       };
     }
-    if (typeof text !== 'string' || !text.trim()) {
+    if ((!text || !text.trim()) && !imageBase64OrUrl && !audioBase64) {
       return { success: false, message: 'INVALID_TEXT: texto da mensagem não pode ser vazio.' };
     }
 
@@ -1937,43 +2049,62 @@ export class WhatsappService implements OnModuleInit {
     const socket = session.sock;
 
     try {
-      const finalText = parseSpintax(text);
+      const finalText = text ? parseSpintax(text) : '';
 
-      // Resolução inteligente do JID: suporta número salvo, não salvo, novo lead ou JID formatado
+      // Resolução inteligente do JID: suporta número salvo, LID, não salvo, novo lead ou JID formatado
       let targetJid: string;
+      const cleanDigits = to.replace(/\D/g, '');
       if (to.includes('@s.whatsapp.net') || to.includes('@lid')) {
         targetJid = to;
+      } else if (cleanDigits.length >= 14 && !cleanDigits.startsWith('55')) {
+        targetJid = `${cleanDigits}@lid`;
       } else {
-        const { candidates } = this.normalizeBrazilianPhone(to);
-        targetJid = `${candidates[0]}@s.whatsapp.net`;
+        const existingConv = this.conversationBrain.getConversation(to) || this.conversationBrain.getConversation(cleanDigits);
+        if (existingConv?.jid && existingConv.jid.includes('@')) {
+          targetJid = existingConv.jid;
+        } else {
+          const { candidates } = this.normalizeBrazilianPhone(to);
+          targetJid = `${candidates[0]}@s.whatsapp.net`;
 
-        // Se o socket suportar onWhatsApp, verifica se o número existe e qual o JID exato (com ou sem 9)
-        if (socket && typeof socket.onWhatsApp === 'function') {
-          let foundWhatsApp = false;
-          let checkedAny = false;
-          for (const cand of candidates) {
-            try {
-              const [res] = await socket.onWhatsApp(cand);
-              checkedAny = true;
-              if (res && res.exists && res.jid) {
-                targetJid = res.jid;
-                foundWhatsApp = true;
-                break;
-              }
-            } catch {}
-          }
+          // Se o socket suportar onWhatsApp, verifica se o número existe e qual o JID exato (com ou sem 9)
+          if (socket && typeof socket.onWhatsApp === 'function') {
+            let foundWhatsApp = false;
+            let checkedAny = false;
+            for (const cand of candidates) {
+              try {
+                const [res] = await socket.onWhatsApp(cand);
+                checkedAny = true;
+                if (res && res.exists && res.jid && res.jid.includes('@')) {
+                  targetJid = res.jid;
+                  foundWhatsApp = true;
+                  break;
+                }
+              } catch {}
+            }
 
-          // Se a verificação confirmou que NENHUM formato desse número possui conta no WhatsApp
-          const cleanTo = to.replace(/\D/g, '');
-          if ((checkedAny && !foundWhatsApp) || cleanTo.includes('984322275') || cleanTo.includes('84322275')) {
-            this.logger.warn(`📵 Número "${to}" verificado sem WhatsApp cadastrado (ou fixo). Cancelando envio.`);
-            return {
-              success: false,
-              message: 'Telefone não possui conta cadastrada no WhatsApp (ou é fixo).',
-              hasWhatsApp: false,
-              isLandline: true
-            };
+            // Se a verificação confirmou que NENHUM formato desse número possui conta no WhatsApp
+            const cleanTo = to.replace(/\D/g, '');
+            if ((checkedAny && !foundWhatsApp) || cleanTo.includes('984322275') || cleanTo.includes('84322275')) {
+              this.logger.warn(`📵 Número "${to}" verificado sem WhatsApp cadastrado (ou fixo). Cancelando envio.`);
+              return {
+                success: false,
+                message: 'Telefone não possui conta cadastrada no WhatsApp (ou é fixo).',
+                hasWhatsApp: false,
+                isLandline: true
+              };
+            }
           }
+        }
+      }
+
+      // GARANTIA ABSOLUTA: targetJid DEVE conter '@' para nunca falhar no jidDecode do Baileys
+      if (!targetJid || !targetJid.includes('@')) {
+        const fallbackDigits = (targetJid || to).replace(/\D/g, '');
+        if (fallbackDigits.length >= 14 && !fallbackDigits.startsWith('55')) {
+          targetJid = `${fallbackDigits}@lid`;
+        } else {
+          const d = fallbackDigits.startsWith('55') ? fallbackDigits : `55${fallbackDigits}`;
+          targetJid = `${d}@s.whatsapp.net`;
         }
       }
 
@@ -1987,21 +2118,23 @@ export class WhatsappService implements OnModuleInit {
       }
 
       try {
-        reservation = this.safety.reserve(targetJid, finalText, purpose);
+        reservation = this.safety.reserve(targetJid, finalText || '[Arquivo]', purpose);
       } catch (e: any) {}
 
-      // Simulação de presença/digitação humana (Anti-Ban orgânico)
-      try {
-        await socket.sendPresenceUpdate('composing', targetJid);
-        const typingDelay = Math.min(2000, Math.max(600, Math.min(finalText.length * 20, 2500)));
-        await new Promise(r => setTimeout(r, typingDelay));
-        await socket.sendPresenceUpdate('paused', targetJid);
-      } catch {}
+      // Simulação de presença/digitação humana apenas para marketing (anti-ban orgânico)
+      if (purpose === 'marketing') {
+        try {
+          await socket.sendPresenceUpdate('composing', targetJid);
+          const typingDelay = Math.min(2000, Math.max(600, Math.min(finalText.length * 20, 2500)));
+          await new Promise(r => setTimeout(r, typingDelay));
+          await socket.sendPresenceUpdate('paused', targetJid);
+        } catch {}
+      }
 
       transportStarted = true;
       let sent: any;
 
-      // Suporte completo a envio com Imagem + Texto ou somente Texto
+      // Suporte completo a envio com Imagem + Texto, Áudio ou somente Texto
       if (imageBase64OrUrl && imageBase64OrUrl.trim()) {
         try {
           const trimmedImg = imageBase64OrUrl.trim();
@@ -2031,6 +2164,19 @@ export class WhatsappService implements OnModuleInit {
           this.logger.warn(`Falha ao anexar imagem, enviando apenas texto: ${imgErr?.message}`);
           sent = await socket.sendMessage(targetJid, { text: finalText });
         }
+      } else if (audioBase64 && audioBase64.trim()) {
+        try {
+          // Converte qualquer áudio para Ogg Opus (48kHz, mono, 64kbps) 100% nativo para notas de voz (PTT) do WhatsApp
+          const { buffer: oggBuffer, mimetype: audioMime } = await convertToWhatsAppVoiceNote(audioBase64);
+          sent = await socket.sendMessage(targetJid, {
+            audio: oggBuffer,
+            mimetype: audioMime,
+            ptt: true,
+          });
+        } catch (audioErr: any) {
+          this.logger.warn(`Falha ao converter/anexar áudio, enviando apenas texto: ${audioErr?.message}`);
+          sent = await socket.sendMessage(targetJid, { text: finalText || '[Áudio]' });
+        }
       } else {
         sent = await socket.sendMessage(targetJid, {
           text: finalText,
@@ -2042,12 +2188,18 @@ export class WhatsappService implements OnModuleInit {
         setTimeout(() => this.botSentMessageIds.delete(sent.key.id), 5 * 60 * 1000).unref();
       }
 
+      this.lastBotReplyTimestampPerChat.set(targetJid, Date.now());
+      const cleanTargetDigits = targetJid.split('@')[0].replace(/\D/g, '');
+      if (cleanTargetDigits) {
+        this.lastBotReplyTimestampPerChat.set(cleanTargetDigits, Date.now());
+      }
+
       if (reservation) {
         try { this.safety.complete(reservation, 'sent'); } catch {}
       }
 
       this.logger.log(`✅ [${session.deviceId}] Mensagem entregue com sucesso para ${targetJid}!`);
-      return { success: true, message: 'Mensagem entregue com sucesso.', jid: targetJid };
+      return { success: true, message: 'Mensagem entregue com sucesso.', jid: targetJid, messageId: sent?.key?.id };
     } catch (error: any) {
       this.logger.error(`❌ [${session.deviceId}] Erro ao enviar mensagem para ${to}: ${error?.message || error}`);
       if (reservation) {
@@ -2059,6 +2211,33 @@ export class WhatsappService implements OnModuleInit {
       };
     } finally {
       this.sendInProgress = false;
+    }
+  }
+
+  async revokeMessage(remoteJid: string, messageId: string, rawDeviceId?: string): Promise<boolean> {
+    try {
+      const session = this.getSession(rawDeviceId);
+      const socket = session.sock;
+      if (!socket || !session.isConnected) return false;
+
+      let targetJid = remoteJid;
+      if (!targetJid.includes('@')) {
+        const d = targetJid.replace(/\D/g, '');
+        targetJid = `${d}@s.whatsapp.net`;
+      }
+
+      await socket.sendMessage(targetJid, {
+        delete: {
+          remoteJid: targetJid,
+          fromMe: true,
+          id: messageId,
+        }
+      });
+      this.logger.log(`🗑️ Mensagem "${messageId}" revogada no WhatsApp para "${targetJid}" via socket.`);
+      return true;
+    } catch (e: any) {
+      this.logger.warn(`Não foi possível revogar mensagem no Baileys socket: ${e?.message}`);
+      return false;
     }
   }
 
@@ -2385,6 +2564,14 @@ export class WhatsappService implements OnModuleInit {
     let clean = rawPhone.replace(/\D/g, '');
     if (!clean) return rawPhone;
 
+    // Se for LID, resolve pelo mapeamento reverso de contatos
+    if (clean.length > 13 && this.conversationBrain) {
+      const resolved = this.conversationBrain.resolveRealPhone(clean);
+      if (resolved.displayPhone && resolved.displayPhone !== clean) {
+        return resolved.displayPhone;
+      }
+    }
+
     while (clean.startsWith('5555') && clean.length >= 14) {
       clean = clean.slice(2);
     }
@@ -2553,7 +2740,7 @@ export class WhatsappService implements OnModuleInit {
            (senderId ? senderId.includes('24443111923942') : false);
   }
 
-  resumeBotForContact(targetId: string): boolean {
+  async resumeBotForContact(targetId: string, triggerWelcome: boolean = false): Promise<boolean> {
     if (!targetId) return false;
     this.humanHandledChats.delete(targetId);
     const clean = targetId.split('@')[0].replace(/\D/g, '');
@@ -2573,6 +2760,18 @@ export class WhatsappService implements OnModuleInit {
       if (clean && clean !== targetId) this.conversationBrain.setBotSilenced(clean, false);
     }
     this.logger.log(`🤖 [Robô Reativado] Atendimento automático reativado para "${targetId}".`);
+
+    if (triggerWelcome && this.botFlowService) {
+      const flow = this.botFlowService.getActiveFlow();
+      if (flow && flow.steps && flow.steps.length > 0) {
+        const firstStep = flow.steps[0];
+        const compiled = this.botFlowService['compileText'](firstStep.message, flow, null, {});
+        // Do not await to avoid blocking controller return
+        this.sendMessage(targetId, compiled, undefined, 'service').catch(e => {
+          this.logger.error(`Erro ao disparar welcome message manual: ${e}`);
+        });
+      }
+    }
     return true;
   }
 
@@ -2588,9 +2787,6 @@ export class WhatsappService implements OnModuleInit {
 
   isHumanHandled(senderId: string): boolean {
     if (!senderId || isGroupOrBroadcastJid(senderId)) return false;
-
-    // Número de teste do operador NUNCA é silenciado
-    if (this.isTestNumber(senderId)) return false;
 
     // 1. Verificação direta pelo JID no mapa de controle humano
     if (this.humanHandledChats.has(senderId)) return true;
@@ -2613,9 +2809,18 @@ export class WhatsappService implements OnModuleInit {
     if (this.conversationBrain) {
       const conv = this.conversationBrain.getConversation(senderId);
       if (conv?.status === 'atendimento_humano') return true;
+      if (conv?.lastMessageSender === 'human') return true;
 
       const contact = this.conversationBrain.getClassifiedContact(senderId);
       if (contact?.botStatus === 'silenciado') return true;
+
+      // Resolução cruzada LID <-> Telefone Real
+      const resolved = this.conversationBrain.resolveRealPhone(senderId);
+      if (resolved?.rawPhone && resolved.rawPhone !== cleanDigits) {
+        if (this.humanHandledChats.has(resolved.rawPhone)) return true;
+        const convByPhone = this.conversationBrain.getConversation(resolved.rawPhone);
+        if (convByPhone?.status === 'atendimento_humano' || convByPhone?.lastMessageSender === 'human') return true;
+      }
     }
 
     // 4. Verificação no estado de sessão em memória
@@ -2655,6 +2860,20 @@ export class WhatsappService implements OnModuleInit {
       }
     }
 
+    // Resolução de LID para número real (garante silenciamento mútuo LID <-> Telefone)
+    if (this.conversationBrain) {
+      const resolved = this.conversationBrain.resolveRealPhone(targetId);
+      if (resolved?.rawPhone && resolved.rawPhone !== cleanDigits) {
+        this.humanHandledChats.set(resolved.rawPhone, now);
+        this.humanHandledChats.set(`${resolved.rawPhone}@s.whatsapp.net`, now);
+        const variants = this.extractNationalPhoneDigits(resolved.rawPhone);
+        for (const v of variants) {
+          this.humanHandledChats.set(v, now);
+          this.humanHandledChats.set(`${v}@s.whatsapp.net`, now);
+        }
+      }
+    }
+
     this.saveHumanHandledChats();
     this.registerAttendedPhone(targetId, 'Intervenção Humana');
 
@@ -2663,7 +2882,7 @@ export class WhatsappService implements OnModuleInit {
       this.conversationBrain?.setBotSilenced(targetId, true);
     } catch {}
 
-    this.logger.log(`👤 [Intervenção Humana Definitiva] Chat "${targetId}" assumido por Weverton. Robô desativado para esta conversa para não atrapalhar.`);
+    this.logger.log(`👤 [Intervenção Humana Definitiva] Chat "${targetId}" assumido pelo atendente. Robô desativado para esta conversa.`);
   }
 
   getHumanHandledChats(): Array<{ id: string; timestamp: number }> {

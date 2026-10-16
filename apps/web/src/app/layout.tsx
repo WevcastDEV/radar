@@ -35,11 +35,19 @@ export default function RootLayout({
                     resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
                   }
                   document.documentElement.classList.remove('dark', 'light');
-                  document.documentElement.classList.add(resolved);
-                  document.documentElement.setAttribute('data-theme', resolved);
-                  document.documentElement.style.colorScheme = resolved;
+                  var b = localStorage.getItem('radar_branding_settings');
+                  var pal = 'orange';
+                  if (b) {
+                    try {
+                      var bp = JSON.parse(b);
+                      if (bp.colorPalette) pal = bp.colorPalette;
+                      if (bp.platformTitle) document.title = bp.platformTitle;
+                    } catch(e) {}
+                  }
+                  document.documentElement.setAttribute('data-color-palette', pal);
                 } catch (e) {
                   document.documentElement.classList.add('dark');
+                  document.documentElement.setAttribute('data-color-palette', 'orange');
                 }
               })();
             `,

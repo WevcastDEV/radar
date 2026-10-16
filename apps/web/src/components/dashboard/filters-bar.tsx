@@ -21,7 +21,7 @@ export function FiltersBar() {
         />
       </div>
       
-      <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 scrollbar-hide">
+      <div className="flex flex-wrap gap-2 w-full md:w-auto">
         <select 
           className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring font-medium text-foreground cursor-pointer"
           value={filters.state || ''}

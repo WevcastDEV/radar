@@ -8,10 +8,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { STATUS_LABELS } from '@radar/types';
 import { MapPin, Phone, Calendar, Target, ArrowLeft, MessageSquare, Globe, Building, CheckCircle2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { detectCategory } from '@/lib/categories';
 import { formatBrazilianPhone, toWhatsAppJidDigits } from '@/lib/phone-utils';
+import { LeadOutreachModal } from '@/components/leads/lead-outreach-modal';
 
 const MapContainer = dynamic(
   () => import('@/components/map/map-container'),
@@ -22,6 +23,7 @@ export default function LeadDetailPage() {
   const router = useRouter();
   const { id } = useParams();
   const { data: lead, isLoading } = useLead(id as string);
+  const [isOutreachOpen, setIsOutreachOpen] = useState(false);
 
   const marker = useMemo(() => {
     if (!lead?.address?.latitude || !lead?.address?.longitude) return [];
@@ -68,8 +70,7 @@ export default function LeadDetailPage() {
 
   const handleWhatsApp = () => {
     if (phone) {
-      window.open(`https://wa.me/${toWhatsAppJidDigits(phone)}?text=${encodeURIComponent('Olá! Somos da equipe comercial.')}`, '_blank');
-      toast.success('Abrindo conversa no WhatsApp!');
+      setIsOutreachOpen(true);
     } else {
       toast.error('Nenhum telefone/WhatsApp disponível para este lead');
     }
@@ -269,6 +270,13 @@ export default function LeadDetailPage() {
           </Card>
         </div>
       </div>
+
+      <LeadOutreachModal
+        isOpen={isOutreachOpen}
+        onClose={() => setIsOutreachOpen(false)}
+        lead={lead ? { ...lead, phone: rawPhone } : null}
+        defaultTemplate="apresentacao"
+      />
     </div>
   );
 }

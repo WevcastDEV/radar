@@ -13,12 +13,15 @@ import {
   EyeOff, 
   Check, 
   Sparkles,
-  Loader2
+  Loader2,
+  Lock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthStore } from '@/stores/auth-store';
 import { savePersistentProfile } from '@/lib/user-profiles';
+import { isUserAdmin, getUserRoleLabel } from '@/lib/auth';
+import { getAttendantLabel } from '@/lib/attendant-label';
 import toast from 'react-hot-toast';
 
 interface UserProfileModalProps {
@@ -44,7 +47,11 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
 
   useEffect(() => {
     if (user && isOpen) {
-      setName(user.name || '');
+      let initialName = user.name || '';
+      if (user.email?.toLowerCase() === 'tom@criart.com' && (!initialName || initialName.toLowerCase().includes('karyna'))) {
+        initialName = 'Tom';
+      }
+      setName(initialName);
       setEmail(user.email || '');
       setAvatar(user.avatar || null);
       setCurrentPassword('');
@@ -56,8 +63,47 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
 
   if (!isOpen) return null;
 
-  // Processar upload de foto e converter para Base64/DataURL
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Função de alta performance para redimensionar e comprimir foto de perfil no cliente
+  const compressAndResizeImage = (file: File, maxDim = 320, quality = 0.82): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onerror = reject;
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > height) {
+            if (width > maxDim) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            }
+          } else {
+            if (height > maxDim) {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(e.target?.result as string);
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed);
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Processar upload de foto e converter para Base64/DataURL ultra leve
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -66,31 +112,39 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('A imagem deve ter no máximo 5MB.');
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('A imagem deve ter no máximo 8MB.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setAvatar(reader.result);
-        toast.success('Foto carregada com sucesso! Clique em "Salvar" para confirmar.');
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressedDataUrl = await compressAndResizeImage(file);
+      setAvatar(compressedDataUrl);
+      try {
+        localStorage.setItem('radar_custom_avatar', compressedDataUrl);
+      } catch {}
+      toast.success('Foto carregada com sucesso! Clique em "Salvar Alterações" para confirmar.');
+    } catch {
+      toast.error('Falha ao processar imagem.');
+    }
   };
 
   const handleRemovePhoto = () => {
     setAvatar(null);
+    try {
+      localStorage.removeItem('radar_custom_avatar');
+    } catch {}
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
     toast.success('Foto removida. O avatar exibirá suas iniciais.');
   };
 
+  const isAdmin = isUserAdmin(user || { email });
+
   const handleSave = async () => {
-    if (!name.trim()) {
+    const finalName = name.trim();
+    if (!finalName) {
       toast.error('O nome não pode ficar em branco.');
       return;
     }
@@ -110,18 +164,36 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
     setSaving(true);
     try {
       // 1. Atualizar no store Zustand, localStorage e registro persistente de perfis
+      const isAdminUser = isUserAdmin(user || { email });
+      const currentRoleName = getUserRoleLabel(user || { email });
+      const currentAvatar = avatar || undefined;
+
       const updatedUser = {
         ...(user || {
-          id: 'user-admin',
-          email: email || 'admin@radar.com',
-          role: { id: 'role-admin', name: 'Administrador', slug: 'admin' },
+          id: isAdminUser ? 'user-admin' : 'user-colab',
+          email: email || 'usuario@radar.com',
         }),
-        name: name.trim(),
-        avatar: avatar || undefined,
+        role: {
+          id: isAdminUser ? 'role-admin' : 'role-user',
+          name: currentRoleName,
+          slug: isAdminUser ? 'admin' : 'user',
+        },
+        name: finalName,
+        avatar: currentAvatar,
       };
+
+      if (currentAvatar) {
+        try { localStorage.setItem('radar_custom_avatar', currentAvatar); } catch {}
+      } else {
+        try { localStorage.removeItem('radar_custom_avatar'); } catch {}
+      }
 
       savePersistentProfile(updatedUser);
       setUser(updatedUser);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('radar-profile-updated', { detail: updatedUser }));
+      }
 
       // 2. Atualizar contas salvas se houver
       if (typeof window !== 'undefined') {
@@ -133,8 +205,8 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
               if (a.identifier?.toLowerCase() === (user?.email || '').toLowerCase()) {
                 return {
                   ...a,
-                  name: name.trim(),
-                  avatar: avatar || undefined,
+                  name: finalName,
+                  avatar: currentAvatar,
                   ...(newPassword.trim() ? { password: newPassword.trim() } : {}),
                 };
               }
@@ -151,7 +223,8 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: name.trim(),
+            id: user?.id || 'user-admin',
+            name: finalName,
             avatar: avatar || null,
           }),
         });
@@ -161,6 +234,7 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              id: user?.id || 'user-admin',
               newPassword: newPassword.trim(),
             }),
           });
@@ -277,16 +351,21 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
           {/* Seção 2: Dados Pessoais (Nome e E-mail) */}
           <div className="space-y-3.5">
             <div>
-              <label className="text-xs font-bold text-foreground flex items-center gap-1.5 mb-1">
-                <User className="w-3.5 h-3.5 text-primary" />
-                Nome Completo
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-primary" />
+                  Nome Completo (Identificação do Atendente)
+                </label>
+              </div>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Ex: Carlos Silva ou Minha Empresa"
                 className="text-xs h-9 font-medium"
               />
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Este nome é enviado em negrito (*{getAttendantLabel()} {name || 'Seu Nome'}*) no WhatsApp para auditoria.
+              </p>
             </div>
 
             <div>
@@ -304,12 +383,16 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
 
             <div>
               <label className="text-xs font-bold text-foreground flex items-center gap-1.5 mb-1">
-                <Shield className="w-3.5 h-3.5 text-emerald-500" />
+                <Shield className={`w-3.5 h-3.5 ${isUserAdmin(user) ? 'text-emerald-500' : 'text-blue-500'}`} />
                 Função no Sistema
               </label>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-bold">
-                <Check className="w-3 h-3" />
-                {user?.role?.name || 'Administrador (Acesso Total)'}
+              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                isUserAdmin(user)
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'
+                  : 'bg-blue-500/10 border-blue-500/20 text-blue-500'
+              }`}>
+                <Shield className="w-3 h-3" />
+                {getUserRoleLabel(user)}
               </div>
             </div>
           </div>

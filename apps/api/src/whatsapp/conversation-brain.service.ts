@@ -2,7 +2,96 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 
+export function isGroupOrBroadcastJid(jid?: string): boolean {
+  if (!jid || typeof jid !== 'string') return true;
+  const clean = jid.toLowerCase().trim();
+  return (
+    clean.endsWith('@g.us') ||
+    clean.endsWith('@broadcast') ||
+    clean.endsWith('@newsletter') ||
+    clean.includes('status@broadcast') ||
+    clean.includes('broadcast') ||
+    clean.includes('@call')
+  );
+}
+
 export type ContactType = 'cliente' | 'amigo';
+
+export interface TagDefinition {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export const DEFAULT_WHATSAPP_TAGS: TagDefinition[] = [
+  { id: 'urgente', name: 'Urgente', color: '#ef4444' },
+  { id: 'importante', name: 'Importante', color: '#f59e0b' },
+  { id: 'orcamento_pendente', name: 'Orçamento Pendente', color: '#8b5cf6' },
+  { id: 'aguardando_retorno', name: 'Aguardando Retorno', color: '#3b82f6' },
+  { id: 'fechado', name: 'Fechado', color: '#10b981' },
+  { id: 'cobranca', name: 'Cobrança', color: '#ea580c' },
+  { id: 'frio', name: 'Frio / Sem Interesse', color: '#64748b' },
+];
+
+export interface QuickMessage {
+  id: string;
+  title: string;
+  shortcut?: string;
+  content: string;
+  category?: string;
+  updatedAt?: number;
+}
+
+export const DEFAULT_WHATSAPP_QUICK_MESSAGES: QuickMessage[] = [
+  {
+    id: 'qm-pix',
+    title: '🔑 Chave Pix & Pagamento',
+    shortcut: '/pix',
+    content: 'Olá, {{nome}}! Segue a nossa chave Pix para pagamento do pedido:\n\n🔑 Chave Pix: 92984892332 (Celular)\n🏢 Favorecido: Criart Gráfica\n\nAssim que efetuar o pagamento, por favor envie o comprovante aqui para liberarmos seu pedido para produção! ✅',
+    category: 'Financeiro',
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'qm-arte',
+    title: '📐 Envio de Arte / Gabarito',
+    shortcut: '/arte',
+    content: 'Para que a impressão do seu material saia com máxima nitidez e perfeição, precisamos que você nos envie o arquivo com as seguintes especificações:\n\n📄 Formatos aceitos: PDF/X-1a, CorelDraw (textos em curvas) ou Illustrator.\n🎨 Padrão de cores: CMYK (evitar RGB).\n🔍 Resolução: Mínimo 300 DPI.\n\nPode anexar o arquivo aqui pelo WhatsApp ou enviar para nosso e-mail!',
+    category: 'Produção',
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'qm-orcamento',
+    title: '📋 Orçamento em Análise',
+    shortcut: '/orcamento',
+    content: 'Recebemos as informações do seu pedido, {{nome}}! 🎯\nNossa equipe comercial já está calculando as melhores opções de papel, formato e acabamento com o melhor custo-benefício.\n\nEm instantes te envio o orçamento detalhado por aqui!',
+    category: 'Comercial',
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'qm-prazo',
+    title: '⏱️ Prazo de Produção',
+    shortcut: '/prazo',
+    content: 'Nosso prazo de produção estimado para o seu material é de 2 a 3 dias úteis, contados a partir da aprovação da arte final e da confirmação do pagamento. Assim que ficar pronto, te avisamos imediatamente!',
+    category: 'Produção',
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'qm-pronto',
+    title: '📦 Pedido Pronto para Retirada',
+    shortcut: '/pronto',
+    content: 'Ótima notícia, {{nome}}! Seu material já foi impresso, finalizado com todo capricho e está pronto para retirada no nosso balcão! 🚀\n\nVenha retirar quando preferir durante nosso horário de atendimento.',
+    category: 'Entrega',
+    updatedAt: Date.now(),
+  },
+  {
+    id: 'qm-horario',
+    title: '📍 Endereço e Horário de Funcionamento',
+    shortcut: '/horario',
+    content: '📍 Endereço da loja: Atendimento Central Criart.\n⏰ Horário de funcionamento: Segunda a Sexta, das 08h às 18h | Sábado das 08h às 12h.\n\nQualquer dúvida, estamos à total disposição!',
+    category: 'Atendimento',
+    updatedAt: Date.now(),
+  },
+];
 
 export interface ClassifiedContact {
   id: string; // Número limpo (ex: 559292920233)
@@ -21,14 +110,42 @@ export interface ClassifiedContact {
   totalMessages: number;
   botStatus: 'ativo' | 'silenciado';
   notes?: string;
+  tags?: string[];
 }
 
 export interface ClientMessage {
   id: string;
+  baileysId?: string;
   sender: 'client' | 'bot' | 'human';
   text: string;
   timestamp: number;
   intentDetected?: string;
+  mediaType?: 'image' | 'audio' | 'document' | 'video';
+  mediaUrl?: string;
+  transcription?: string;
+  isEdited?: boolean;
+  editedAt?: number;
+  isPinned?: boolean;
+  isStarred?: boolean;
+  isDeleted?: boolean;
+  reactions?: { emoji: string; by: string }[];
+  quotedMessage?: { id: string; sender: string; text: string };
+}
+
+export interface ScheduledMessage {
+  id: string;
+  conversationId: string;
+  phone: string;
+  contactName?: string;
+  jid?: string;
+  text: string;
+  scheduledFor: number; // timestamp em ms
+  createdAt: number;
+  status: 'pending' | 'sent' | 'canceled' | 'failed';
+  sentAt?: number;
+  type: 'manual_schedule' | 'follow_up_budget';
+  attendantName?: string;
+  error?: string;
 }
 
 export interface ClientConversation {
@@ -41,6 +158,7 @@ export interface ClientConversation {
   interestScore: number; // 0 a 100
   leadTemperature: 'frio' | 'morno' | 'quente' | 'fechando';
   detectedIntents: string[];
+  tags?: string[];
   businessContext: {
     askedPrice?: boolean;
     askedLocation?: boolean;
@@ -58,6 +176,8 @@ export interface ClientConversation {
   createdAt: number;
   messagesCount: number;
   messages: ClientMessage[];
+  unreadCount?: number;
+  isRead?: boolean;
 }
 
 export interface CustomFaqRule {
@@ -185,12 +305,21 @@ export class ConversationBrainService {
   private conversations: Map<string, ClientConversation> = new Map();
   private classifiedContacts: Map<string, ClassifiedContact> = new Map();
   private config: ConversationConfig = { ...DEFAULT_CONFIG };
+  private tags: TagDefinition[] = [];
+  private quickMessages: QuickMessage[] = [];
+  private scheduledMessages: ScheduledMessage[] = [];
 
   constructor() {
     this.initDataDirectory();
     this.loadConfig();
+    this.loadDeletedMessageIds();
+    this.loadLidMappings();
     this.loadConversations();
     this.loadContactsDatabase();
+    this.repairConversationData();
+    this.loadTags();
+    this.loadQuickMessages();
+    this.loadScheduledMessages();
   }
 
   private getDataDir(): string {
@@ -222,11 +351,262 @@ export class ConversationBrainService {
     return path.join(this.getDataDir(), 'whatsapp_contacts_database.json');
   }
 
+  private getTagsFilePath(): string {
+    return path.join(this.getDataDir(), 'whatsapp_tags.json');
+  }
+
+  private getQuickMessagesFilePath(): string {
+    return path.join(this.getDataDir(), 'whatsapp_quick_messages.json');
+  }
+
+  private getDeletedMessagesFilePath(): string {
+    return path.join(this.getDataDir(), 'deleted_message_ids.json');
+  }
+
+  private deletedMessageIds: Set<string> = new Set();
+
+  private loadDeletedMessageIds() {
+    try {
+      const file = this.getDeletedMessagesFilePath();
+      if (fs.existsSync(file)) {
+        const raw = fs.readFileSync(file, 'utf8');
+        const list: string[] = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          this.deletedMessageIds = new Set(list);
+          this.logger.log(`Tombstones de mensagens apagadas carregados: ${this.deletedMessageIds.size} IDs.`);
+        }
+      }
+    } catch (e: any) {
+      this.logger.error(`Erro ao carregar deleted_message_ids.json: ${e?.message}`);
+    }
+  }
+
+  private saveDeletedMessageIds() {
+    try {
+      const arr = Array.from(this.deletedMessageIds).slice(-10000);
+      fs.writeFileSync(this.getDeletedMessagesFilePath(), JSON.stringify(arr, null, 2), 'utf8');
+    } catch (e: any) {
+      this.logger.error(`Erro ao salvar deleted_message_ids.json: ${e?.message}`);
+    }
+  }
+
+  isMessageDeleted(messageId: string): boolean {
+    if (!messageId) return false;
+    return this.deletedMessageIds.has(messageId);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // 👥 BANCO DE DADOS DE CONTATOS (CLIENTES vs AMIGOS / PESSOAL)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  private loadContactsDatabase() {
+  private lidToPhoneCache: Map<string, string> = new Map();
+
+  private getAuthInfoDir(): string {
+    const candidates = [
+      path.join(process.cwd(), 'apps', 'api', 'auth_info_baileys'),
+      path.join(process.cwd(), 'auth_info_baileys'),
+    ];
+    for (const dir of candidates) {
+      if (fs.existsSync(dir)) return dir;
+    }
+    return '';
+  }
+
+  loadLidMappings() {
+    const authDir = this.getAuthInfoDir();
+    if (!authDir || !fs.existsSync(authDir)) return;
+    try {
+      const scanDir = (dir: string) => {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            scanDir(fullPath);
+          } else if (entry.name.startsWith('lid-mapping-') && entry.name.endsWith('_reverse.json')) {
+            try {
+              const lid = entry.name.replace('lid-mapping-', '').replace('_reverse.json', '').replace(/\D/g, '');
+              const raw = fs.readFileSync(fullPath, 'utf8');
+              const resolved = JSON.parse(raw);
+              if (resolved && typeof resolved === 'string') {
+                const cleanPn = resolved.replace(/\D/g, '');
+                if (cleanPn) {
+                  this.lidToPhoneCache.set(lid, cleanPn);
+                }
+              }
+            } catch {}
+          }
+        }
+      };
+      scanDir(authDir);
+      this.logger.log(`Mapeamentos LID -> Telefone carregados: ${this.lidToPhoneCache.size} correspondências.`);
+    } catch (e: any) {
+      this.logger.warn(`Aviso ao carregar mapeamentos LID: ${e?.message}`);
+    }
+  }
+
+  private repairConversationData() {
+    let modified = false;
+    for (const [id, conv] of this.conversations.entries()) {
+      const resolved = this.resolveRealPhone(conv.phone || conv.id || conv.jid);
+      if (resolved.displayPhone && resolved.displayPhone !== conv.phone && resolved.rawPhone !== conv.phone) {
+        conv.phone = resolved.displayPhone;
+        modified = true;
+      }
+      if (conv.name && conv.name.startsWith('Contato ') && conv.name.length > 15) {
+        conv.name = `Contato ${resolved.displayPhone}`;
+        modified = true;
+      }
+    }
+    for (const [id, contact] of this.classifiedContacts.entries()) {
+      const resolved = this.resolveRealPhone(contact.phone || contact.id || contact.jid);
+      if (resolved.displayPhone && resolved.displayPhone !== contact.phone && resolved.rawPhone !== contact.phone) {
+        contact.phone = resolved.displayPhone;
+        modified = true;
+      }
+    }
+    if (modified) {
+      this.saveConversationsToDisk(true);
+      this.saveContactsDatabase(true);
+      this.logger.log('Auto-correção de telefones e nomes de conversas executada com sucesso.');
+    }
+  }
+
+  resolveRealPhone(jidOrPhone: string): { rawPhone: string; displayPhone: string } {
+    if (!jidOrPhone) return { rawPhone: '', displayPhone: '' };
+    const clean = jidOrPhone.split('@')[0].split(':')[0].replace(/\D/g, '');
+    if (!clean) return { rawPhone: '', displayPhone: '' };
+
+    // Se já é número com padrão brasileiro direto (10, 11 dígitos, ou 12/13 com DDI 55)
+    if (clean.length <= 13 && (clean.startsWith('55') || clean.length === 10 || clean.length === 11)) {
+      return {
+        rawPhone: clean,
+        displayPhone: this.formatBrazilianPhoneWithDDD(clean),
+      };
+    }
+
+    // Se já está no cache de LID -> Telefone
+    if (this.lidToPhoneCache.has(clean)) {
+      const cached = this.lidToPhoneCache.get(clean)!;
+      return {
+        rawPhone: cached,
+        displayPhone: this.formatBrazilianPhoneWithDDD(cached),
+      };
+    }
+
+    // Varredura recursiva em todas as pastas de auth_info_baileys
+    const authDir = this.getAuthInfoDir();
+    if (authDir && fs.existsSync(authDir)) {
+      try {
+        const findReverse = (dir: string): string | null => {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              const found = findReverse(fullPath);
+              if (found) return found;
+            } else if (entry.name === `lid-mapping-${clean}_reverse.json`) {
+              const raw = fs.readFileSync(fullPath, 'utf8');
+              const resolved = JSON.parse(raw);
+              if (resolved && typeof resolved === 'string') {
+                return resolved.replace(/\D/g, '');
+              }
+            }
+          }
+          return null;
+        };
+
+        const resolvedPn = findReverse(authDir);
+        if (resolvedPn) {
+          this.lidToPhoneCache.set(clean, resolvedPn);
+          return {
+            rawPhone: resolvedPn,
+            displayPhone: this.formatBrazilianPhoneWithDDD(resolvedPn),
+          };
+        }
+      } catch {}
+    }
+
+    // Fallback: se algum contato classificado tem telefone mapeado
+    for (const [_, contact] of this.classifiedContacts.entries()) {
+      if ((contact.id === clean || contact.jid?.includes(clean)) && contact.phone && contact.phone !== clean) {
+        const pn = contact.phone.replace(/\D/g, '');
+        if (pn.length <= 13 && pn.length >= 10) {
+          this.lidToPhoneCache.set(clean, pn);
+          return {
+            rawPhone: pn,
+            displayPhone: this.formatBrazilianPhoneWithDDD(pn),
+          };
+        }
+      }
+    }
+
+    return {
+      rawPhone: clean,
+      displayPhone: this.formatBrazilianPhoneWithDDD(clean),
+    };
+  }
+
+  updateConversationContact(
+    idOrPhone: string,
+    data: { name?: string; phone?: string; notes?: string; contactType?: ContactType; crmStage?: string }
+  ): boolean {
+    const conv = this.getConversationRef(idOrPhone);
+    if (!conv) return false;
+
+    if (data.name && data.name.trim()) {
+      conv.name = data.name.trim();
+    }
+    if (data.phone && data.phone.trim()) {
+      const resolved = this.resolveRealPhone(data.phone.trim());
+      conv.phone = resolved.displayPhone || data.phone.trim();
+    }
+    if (data.contactType) {
+      conv.contactType = data.contactType;
+    }
+    if (data.notes !== undefined) {
+      if (!conv.businessContext) conv.businessContext = {};
+      (conv.businessContext as any).notes = data.notes;
+    }
+    if (data.crmStage) {
+      if (!conv.businessContext) conv.businessContext = {};
+      (conv.businessContext as any).crmStage = data.crmStage;
+    }
+
+    const cleanId = this.extractCleanId(idOrPhone);
+    const contact = this.classifiedContacts.get(cleanId) || this.classifiedContacts.get(conv.id);
+    if (contact) {
+      if (data.name && data.name.trim()) contact.name = data.name.trim();
+      if (data.phone && data.phone.trim()) contact.phone = conv.phone;
+      if (data.contactType) contact.type = data.contactType;
+      if (data.notes !== undefined) contact.notes = data.notes;
+    }
+
+    this.saveConversationsToDisk(true);
+    this.saveContactsDatabase(true);
+    return true;
+  }
+
+  formatBrazilianPhoneWithDDD(cleanNumber: string): string {
+    if (!cleanNumber) return '';
+    let digits = cleanNumber.replace(/\D/g, '');
+    if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+      digits = digits.slice(2);
+    }
+    const ddd = digits.slice(0, 2);
+    let num = digits.slice(2);
+    if (num.length === 8 && ['6', '7', '8', '9'].includes(num[0])) {
+      num = '9' + num;
+    }
+    if (num.length === 9) {
+      return `(${ddd}) ${num.slice(0, 5)}-${num.slice(5)}`;
+    }
+    if (num.length === 8) {
+      return `(${ddd}) ${num.slice(0, 4)}-${num.slice(4)}`;
+    }
+    return cleanNumber;
+  }
+
+    private loadContactsDatabase() {
     try {
       const file = this.getContactsDatabaseFilePath();
       if (fs.existsSync(file)) {
@@ -308,12 +688,55 @@ export class ConversationBrainService {
     }
   }
 
-  private saveContactsDatabase() {
+  private saveContactsTimer: NodeJS.Timeout | null = null;
+  private isSavingContacts = false;
+  private pendingSaveContacts = false;
+
+  private saveContactsDatabase(immediate = false) {
+    if (immediate) {
+      if (this.saveContactsTimer) {
+        clearTimeout(this.saveContactsTimer);
+        this.saveContactsTimer = null;
+      }
+      try {
+        const list = Array.from(this.classifiedContacts.values());
+        const filePath = this.getContactsDatabaseFilePath();
+        const tmpPath = `${filePath}.tmp`;
+        fs.writeFileSync(tmpPath, JSON.stringify(list), 'utf8');
+        fs.renameSync(tmpPath, filePath);
+      } catch (e: any) {
+        this.logger.error(`Erro ao salvar whatsapp_contacts_database.json (sync): ${e?.message}`);
+      }
+      return;
+    }
+
+    if (this.saveContactsTimer) return;
+    this.saveContactsTimer = setTimeout(() => {
+      this.saveContactsTimer = null;
+      this.flushContactsAsync();
+    }, 450);
+  }
+
+  private async flushContactsAsync() {
+    if (this.isSavingContacts) {
+      this.pendingSaveContacts = true;
+      return;
+    }
+    this.isSavingContacts = true;
     try {
       const list = Array.from(this.classifiedContacts.values());
-      fs.writeFileSync(this.getContactsDatabaseFilePath(), JSON.stringify(list, null, 2), 'utf8');
+      const filePath = this.getContactsDatabaseFilePath();
+      const tmpPath = `${filePath}.tmp`;
+      await fs.promises.writeFile(tmpPath, JSON.stringify(list), 'utf8');
+      await fs.promises.rename(tmpPath, filePath);
     } catch (e: any) {
-      this.logger.error(`Erro ao salvar whatsapp_contacts_database.json: ${e?.message}`);
+      this.logger.error(`Erro ao salvar whatsapp_contacts_database.json (async): ${e?.message}`);
+    } finally {
+      this.isSavingContacts = false;
+      if (this.pendingSaveContacts) {
+        this.pendingSaveContacts = false;
+        this.saveContactsDatabase();
+      }
     }
   }
 
@@ -677,12 +1100,82 @@ export class ConversationBrainService {
     }
   }
 
-  private saveConversationsToDisk() {
+  private saveConversationsTimer: NodeJS.Timeout | null = null;
+  private isSavingConversations = false;
+  private pendingSaveConversations = false;
+
+  private saveConversationsToDisk(immediate = false) {
+    if (immediate) {
+      if (this.saveConversationsTimer) {
+        clearTimeout(this.saveConversationsTimer);
+        this.saveConversationsTimer = null;
+      }
+      try {
+        const list = Array.from(this.conversations.values());
+        const filePath = this.getDatabaseFilePath();
+        const tmpPath = `${filePath}.tmp`;
+        fs.writeFileSync(tmpPath, JSON.stringify(list), 'utf8');
+        fs.renameSync(tmpPath, filePath);
+      } catch (e: any) {
+        this.logger.error(`Erro ao salvar conversations_database.json (sync): ${e?.message}`);
+      }
+      return;
+    }
+
+    if (this.saveConversationsTimer) return;
+    this.saveConversationsTimer = setTimeout(() => {
+      this.saveConversationsTimer = null;
+      this.flushConversationsAsync();
+    }, 350);
+  }
+
+  private async flushConversationsAsync() {
+    if (this.isSavingConversations) {
+      this.pendingSaveConversations = true;
+      return;
+    }
+    this.isSavingConversations = true;
     try {
       const list = Array.from(this.conversations.values());
-      fs.writeFileSync(this.getDatabaseFilePath(), JSON.stringify(list, null, 2), 'utf8');
+      const filePath = this.getDatabaseFilePath();
+      const tmpPath = `${filePath}.tmp`;
+      await fs.promises.writeFile(tmpPath, JSON.stringify(list), 'utf8');
+      await fs.promises.rename(tmpPath, filePath);
     } catch (e: any) {
-      this.logger.error(`Erro ao salvar conversations_database.json: ${e?.message}`);
+      this.logger.error(`Erro ao salvar conversations_database.json (async): ${e?.message}`);
+    } finally {
+      this.isSavingConversations = false;
+      if (this.pendingSaveConversations) {
+        this.pendingSaveConversations = false;
+        this.saveConversationsToDisk();
+      }
+    }
+  }
+
+  private loadTags() {
+    try {
+      const file = this.getTagsFilePath();
+      if (fs.existsSync(file)) {
+        const raw = fs.readFileSync(file, 'utf8');
+        const list: TagDefinition[] = JSON.parse(raw);
+        if (Array.isArray(list) && list.length > 0) {
+          this.tags = list;
+          this.logger.log(`Etiquetas do WhatsApp carregadas: ${this.tags.length} etiquetas registradas.`);
+          return;
+        }
+      }
+    } catch (e: any) {
+      this.logger.error(`Erro ao carregar whatsapp_tags.json: ${e?.message}`);
+    }
+    this.tags = [...DEFAULT_WHATSAPP_TAGS];
+    this.saveTags();
+  }
+
+  private saveTags() {
+    try {
+      fs.writeFileSync(this.getTagsFilePath(), JSON.stringify(this.tags, null, 2), 'utf8');
+    } catch (e: any) {
+      this.logger.error(`Erro ao salvar whatsapp_tags.json: ${e?.message}`);
     }
   }
 
@@ -694,32 +1187,102 @@ export class ConversationBrainService {
     return slug || `contact_${Date.now()}`;
   }
 
-  getConversation(jidOrPhone: string): ClientConversation | undefined {
+  getConversationRef(jidOrPhone: string): ClientConversation | undefined {
+    if (!jidOrPhone) return undefined;
     const id = this.extractCleanId(jidOrPhone);
-    return this.conversations.get(id);
+    let conv = this.conversations.get(id);
+    if (!conv) {
+      for (const c of this.conversations.values()) {
+        if (c.jid === jidOrPhone || c.phone === jidOrPhone || c.id === jidOrPhone) {
+          conv = c;
+          break;
+        }
+        const cPhoneDigits = (c.phone || '').replace(/\D/g, '');
+        if (cPhoneDigits && (cPhoneDigits === id || id.endsWith(cPhoneDigits) || cPhoneDigits.endsWith(id))) {
+          conv = c;
+          break;
+        }
+      }
+    }
+    return conv;
   }
 
-  getAllConversations(filter?: { status?: string; search?: string; limit?: number }): {
-    items: ClientConversation[];
+  getConversationRefByMessageId(messageId: string): ClientConversation | undefined {
+    if (!messageId) return undefined;
+    for (const c of this.conversations.values()) {
+      if (Array.isArray(c.messages) && c.messages.some(m => m.id === messageId || m.baileysId === messageId)) {
+        return c;
+      }
+    }
+    return undefined;
+  }
+
+  getConversation(jidOrPhone: string): ClientConversation | undefined {
+    const conv = this.getConversationRef(jidOrPhone);
+    if (!conv) return undefined;
+    const resolved = this.resolveRealPhone(conv.phone || conv.id || conv.jid);
+    const displayPhone = resolved.displayPhone || conv.phone;
+    let name = conv.name;
+    if (name && name.startsWith('Contato ') && name.length > 15) {
+      name = `Contato ${displayPhone}`;
+    }
+    return {
+      ...conv,
+      phone: displayPhone,
+      name,
+    };
+  }
+
+  getAllConversations(filter?: { status?: string; search?: string; tag?: string; limit?: number }): {
+    items: any[];
     total: number;
     stats: {
       totalConversations: number;
       totalMessages: number;
       hotLeadsCount: number;
+      vacuumCount: number;
+      unreadCount: number;
+      humanCount: number;
+      botCount: number;
+      messagedToday: number;
       intentsRanking: Record<string, number>;
     };
   } {
     let list = Array.from(this.conversations.values());
+    const now = Date.now();
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const startOfDayTs = startOfDay.getTime();
 
     // Estatísticas gerais
     let totalMessages = 0;
     let hotLeadsCount = 0;
+    let vacuumCount = 0;
+    let unreadCount = 0;
+    let humanCount = 0;
+    let botCount = 0;
+    let messagedToday = 0;
     const intentsRanking: Record<string, number> = {};
 
     for (const c of list) {
       totalMessages += c.messagesCount || (c.messages ? c.messages.length : 0);
       if (c.leadTemperature === 'quente' || c.leadTemperature === 'fechando' || c.status === 'qualificado') {
         hotLeadsCount++;
+      }
+      if (c.lastMessageSender === 'client') {
+        vacuumCount++;
+      }
+      const isUnread = (c.unreadCount && c.unreadCount > 0) || (c.lastMessageSender === 'client' && c.isRead === false);
+      if (isUnread) {
+        unreadCount++;
+      }
+      if (c.status === 'atendimento_humano') {
+        humanCount++;
+      } else {
+        botCount++;
+      }
+      if (c.lastInteractionAt >= startOfDayTs) {
+        messagedToday++;
       }
       for (const intent of c.detectedIntents || []) {
         intentsRanking[intent] = (intentsRanking[intent] || 0) + 1;
@@ -728,7 +1291,22 @@ export class ConversationBrainService {
 
     // Filtros
     if (filter?.status && filter.status !== 'all') {
-      list = list.filter(c => c.status === filter.status);
+      if (filter.status === 'vacuum') {
+        list = list.filter(c => c.lastMessageSender === 'client');
+      } else if (filter.status === 'unread') {
+        list = list.filter(c => (c.unreadCount && c.unreadCount > 0) || (c.lastMessageSender === 'client' && c.isRead === false));
+      } else if (filter.status === 'bot') {
+        list = list.filter(c => c.status !== 'atendimento_humano');
+      } else if (filter.status === 'human') {
+        list = list.filter(c => c.status === 'atendimento_humano');
+      } else {
+        list = list.filter(c => c.status === filter.status);
+      }
+    }
+
+    if (filter?.tag && filter.tag !== 'all') {
+      const qTag = normalizeText(filter.tag);
+      list = list.filter(c => Array.isArray(c.tags) && c.tags.some(t => normalizeText(t) === qTag || t.toLowerCase() === filter.tag.toLowerCase()));
     }
 
     if (filter?.search) {
@@ -736,8 +1314,9 @@ export class ConversationBrainService {
       list = list.filter(c => 
         normalizeText(c.name).includes(q) || 
         c.phone.includes(q) || 
-        c.id.includes(q) ||
-        normalizeText(c.lastMessageSnippet).includes(q)
+        c.id.includes(q) || 
+        normalizeText(c.lastMessageSnippet).includes(q) ||
+        (Array.isArray(c.tags) && c.tags.some(t => normalizeText(t).includes(q)))
       );
     }
 
@@ -749,28 +1328,824 @@ export class ConversationBrainService {
       list = list.slice(0, filter.limit);
     }
 
+    const items = list.map(c => {
+      const resolved = this.resolveRealPhone(c.phone || c.id || c.jid);
+      const displayPhone = resolved.displayPhone || c.phone;
+      let name = c.name;
+      if (name && name.startsWith('Contato ') && name.length > 15) {
+        name = `Contato ${displayPhone}`;
+      }
+      const isWaitingReply = c.lastMessageSender === 'client';
+      const waitingTimeMinutes = isWaitingReply ? Math.max(0, Math.floor((now - c.lastInteractionAt) / 60000)) : 0;
+      const unreadCountNum = typeof c.unreadCount === 'number' ? c.unreadCount : (c.lastMessageSender === 'client' && c.isRead === false ? 1 : 0);
+      const isReadBool = c.isRead !== undefined ? c.isRead : (c.lastMessageSender !== 'client');
+
+      // Otimização de Performance: Omitir o array gigante de histórico de mensagens na listagem geral do sidebar.
+      // Envia apenas a última mensagem para preview instantâneo no card do contato, reduzindo o payload em ~98%.
+      const { messages, ...restOfConv } = c;
+      const lastMsg = (messages && messages.length > 0) ? [messages[messages.length - 1]] : [];
+
+      return {
+        ...restOfConv,
+        messagesCount: c.messagesCount || (messages ? messages.length : 0),
+        messages: lastMsg,
+        phone: displayPhone,
+        name,
+        isWaitingReply,
+        waitingTimeMinutes,
+        unreadCount: unreadCountNum,
+        isRead: isReadBool,
+      };
+    });
+
     return {
-      items: list,
+      items,
       total,
       stats: {
         totalConversations: this.conversations.size,
         totalMessages,
         hotLeadsCount,
+        vacuumCount,
+        unreadCount,
+        humanCount,
+        botCount,
+        messagedToday,
         intentsRanking,
       },
     };
   }
 
+  markConversationAsRead(jidOrPhone: string): boolean {
+    const clean = this.extractCleanId(jidOrPhone);
+    const conv = this.conversations.get(clean);
+    if (conv) {
+      conv.unreadCount = 0;
+      conv.isRead = true;
+      this.saveConversationsToDisk();
+      return true;
+    }
+    return false;
+  }
+
+  markConversationAsUnread(jidOrPhone: string): boolean {
+    const clean = this.extractCleanId(jidOrPhone);
+    const conv = this.conversations.get(clean);
+    if (conv) {
+      conv.unreadCount = Math.max(1, (conv.unreadCount || 0) + 1);
+      conv.isRead = false;
+      this.saveConversationsToDisk();
+      return true;
+    }
+    return false;
+  }
+
   deleteConversation(jidOrPhone: string): boolean {
-    const id = this.extractCleanId(jidOrPhone);
-    const removed = this.conversations.delete(id);
-    if (removed) this.saveConversationsToDisk();
+    if (!jidOrPhone) return false;
+    let removed = false;
+    const conv = this.getConversationRef(jidOrPhone);
+    if (conv) {
+      if (Array.isArray(conv.messages)) {
+        for (const m of conv.messages) {
+          if (m.id) this.deletedMessageIds.add(m.id);
+          if (m.baileysId) this.deletedMessageIds.add(m.baileysId);
+        }
+        this.saveDeletedMessageIds();
+      }
+      this.conversations.delete(conv.id);
+      removed = true;
+    }
+    const clean = this.extractCleanId(jidOrPhone);
+    if (this.conversations.has(clean)) {
+      this.conversations.delete(clean);
+      removed = true;
+    }
+    if (this.conversations.has(jidOrPhone)) {
+      this.conversations.delete(jidOrPhone);
+      removed = true;
+    }
+    if (removed) {
+      this.saveConversationsToDisk(true);
+    }
     return removed;
   }
 
-  clearAllConversations(): void {
-    this.conversations.clear();
+  clearConversationMessages(jidOrPhone: string): boolean {
+    const conv = this.getConversationRef(jidOrPhone);
+    if (!conv || !Array.isArray(conv.messages)) return false;
+
+    for (const m of conv.messages) {
+      if (m.id) this.deletedMessageIds.add(m.id);
+      if (m.baileysId) this.deletedMessageIds.add(m.baileysId);
+    }
+    this.saveDeletedMessageIds();
+
+    conv.messages = [];
+    conv.messagesCount = 0;
+    conv.lastMessageSnippet = '';
+    conv.unreadCount = 0;
+
+    this.saveConversationsToDisk(true);
+    return true;
+  }
+
+  editMessage(jidOrPhone: string, messageId: string, newText: string): boolean {
+    let conv = this.getConversationRef(jidOrPhone) || this.getConversationRefByMessageId(messageId);
+    if (!conv || !Array.isArray(conv.messages)) return false;
+
+    const msg = conv.messages.find(m => m.id === messageId || m.baileysId === messageId);
+    if (!msg) return false;
+
+    msg.text = newText;
+    msg.isEdited = true;
+    msg.editedAt = Date.now();
+
+    // Atualiza snippet da última mensagem se for ela
+    const lastMsg = conv.messages[conv.messages.length - 1];
+    if (lastMsg && (lastMsg.id === messageId || lastMsg.baileysId === messageId)) {
+      conv.lastMessageSnippet = newText.slice(0, 80);
+    }
+
     this.saveConversationsToDisk();
+    return true;
+  }
+
+  deleteMessage(jidOrPhone: string, messageId: string, forEveryone: boolean = false): boolean {
+    if (!messageId) return false;
+
+    // Registra tombstone para o messageId para nunca mais ressuscitar
+    this.deletedMessageIds.add(messageId);
+
+    let conv = this.getConversationRef(jidOrPhone) || this.getConversationRefByMessageId(messageId);
+    if (!conv || !Array.isArray(conv.messages)) {
+      this.saveDeletedMessageIds();
+      return true;
+    }
+
+    const msg = conv.messages.find(m => m.id === messageId || m.baileysId === messageId);
+    if (!msg) {
+      this.saveDeletedMessageIds();
+      return true;
+    }
+
+    if (msg.baileysId) {
+      this.deletedMessageIds.add(msg.baileysId);
+    }
+    if (msg.id) {
+      this.deletedMessageIds.add(msg.id);
+    }
+    this.saveDeletedMessageIds();
+
+    if (forEveryone) {
+      msg.isDeleted = true;
+      msg.text = '🚫 Esta mensagem foi apagada';
+      msg.mediaType = undefined;
+      msg.mediaUrl = undefined;
+    } else {
+      conv.messages = conv.messages.filter(m => m.id !== messageId && m.baileysId !== messageId);
+    }
+
+    if (conv.messages.length > 0) {
+      const lastMsg = conv.messages[conv.messages.length - 1];
+      conv.lastMessageSnippet = lastMsg.text?.slice(0, 80) || '';
+      conv.lastMessageSender = lastMsg.sender;
+    } else {
+      conv.lastMessageSnippet = '';
+    }
+
+    this.saveConversationsToDisk(true);
+    return true;
+  }
+
+  togglePinMessage(jidOrPhone: string, messageId: string): boolean {
+    let conv = this.getConversationRef(jidOrPhone) || this.getConversationRefByMessageId(messageId);
+    if (!conv || !Array.isArray(conv.messages)) return false;
+
+    const msg = conv.messages.find(m => m.id === messageId || m.baileysId === messageId);
+    if (!msg) return false;
+
+    msg.isPinned = !msg.isPinned;
+    this.saveConversationsToDisk();
+    return true;
+  }
+
+  toggleStarMessage(jidOrPhone: string, messageId: string): boolean {
+    let conv = this.getConversationRef(jidOrPhone) || this.getConversationRefByMessageId(messageId);
+    if (!conv || !Array.isArray(conv.messages)) return false;
+
+    const msg = conv.messages.find(m => m.id === messageId || m.baileysId === messageId);
+    if (!msg) return false;
+
+    msg.isStarred = !msg.isStarred;
+    this.saveConversationsToDisk();
+    return true;
+  }
+
+  reactToMessage(jidOrPhone: string, messageId: string, emoji: string): boolean {
+    let conv = this.getConversationRef(jidOrPhone) || this.getConversationRefByMessageId(messageId);
+    if (!conv || !Array.isArray(conv.messages)) return false;
+
+    const msg = conv.messages.find(m => m.id === messageId || m.baileysId === messageId);
+    if (!msg) return false;
+
+    if (!Array.isArray(msg.reactions)) {
+      msg.reactions = [];
+    }
+    const existingIdx = msg.reactions.findIndex(r => r.emoji === emoji);
+    if (existingIdx >= 0) {
+      msg.reactions.splice(existingIdx, 1);
+    } else {
+      msg.reactions.push({ emoji, by: 'me' });
+    }
+
+    this.saveConversationsToDisk();
+    return true;
+  }
+
+  clearAllConversations(): void {
+    for (const c of this.conversations.values()) {
+      if (Array.isArray(c.messages)) {
+        for (const m of c.messages) {
+          if (m.id) this.deletedMessageIds.add(m.id);
+          if (m.baileysId) this.deletedMessageIds.add(m.baileysId);
+        }
+      }
+    }
+    this.saveDeletedMessageIds();
+    this.conversations.clear();
+    this.saveConversationsToDisk(true);
+  }
+
+  clearAllClientHistory(): {
+    conversationsCleared: number;
+    contactsCleared: number;
+    scheduledCleared: number;
+  } {
+    const conversationsCleared = this.conversations.size;
+    const contactsCleared = this.classifiedContacts.size;
+    const scheduledCleared = this.scheduledMessages.length;
+
+    for (const c of this.conversations.values()) {
+      if (Array.isArray(c.messages)) {
+        for (const m of c.messages) {
+          if (m.id) this.deletedMessageIds.add(m.id);
+          if (m.baileysId) this.deletedMessageIds.add(m.baileysId);
+        }
+      }
+    }
+    this.saveDeletedMessageIds();
+
+    this.conversations.clear();
+    this.saveConversationsToDisk(true);
+
+    this.classifiedContacts.clear();
+    this.saveContactsDatabase(true);
+
+    this.scheduledMessages = [];
+    this.saveScheduledMessages();
+
+    this.logger.log(`🧹 [RESET CLIENTES] Histórico de clientes limpo: ${conversationsCleared} conversas, ${contactsCleared} contatos classificados e ${scheduledCleared} agendamentos removidos.`);
+
+    return {
+      conversationsCleared,
+      contactsCleared,
+      scheduledCleared,
+    };
+  }
+
+  updateContactName(jidOrPhone: string, newName: string): ClientConversation | null {
+    if (!newName || !newName.trim()) return null;
+    const cleanName = newName.trim();
+    const cleanId = this.extractCleanId(jidOrPhone);
+
+    let conv = this.getConversationRef(jidOrPhone);
+    if (!conv && cleanId) {
+      conv = this.conversations.get(cleanId) || null;
+    }
+    if (!conv && jidOrPhone) {
+      for (const [_, c] of this.conversations.entries()) {
+        if (
+          c.id === jidOrPhone ||
+          c.jid === jidOrPhone ||
+          c.phone === jidOrPhone ||
+          c.phone?.replace(/\D/g, '') === cleanId ||
+          c.id?.replace(/\D/g, '') === cleanId
+        ) {
+          conv = c;
+          break;
+        }
+      }
+    }
+
+    if (!conv) {
+      this.logger.warn(`Não foi possível localizar conversa para renomear: "${jidOrPhone}"`);
+      return null;
+    }
+
+    conv.name = cleanName;
+    if (conv.id) {
+      this.conversations.set(conv.id, conv);
+    }
+    this.saveConversationsToDisk(true);
+
+    // Sincroniza também no banco de contatos classificados
+    const contactKeys = [cleanId, conv.id, conv.phone?.replace(/\D/g, '')].filter(Boolean) as string[];
+    for (const ck of contactKeys) {
+      const contact = this.classifiedContacts.get(ck);
+      if (contact) {
+        contact.name = cleanName;
+        this.saveContactsDatabase();
+        break;
+      }
+    }
+
+    this.logger.log(`Nome do contato "${conv.id || cleanId}" atualizado para "${cleanName}".`);
+    return conv;
+  }
+
+  updateConversationTags(jidOrPhone: string, tags: string[]): ClientConversation | null {
+    const cleanId = this.extractCleanId(jidOrPhone);
+    const conv = this.conversations.get(cleanId);
+    if (!conv) return null;
+
+    const uniqueTags = Array.from(new Set(tags.filter(t => Boolean(t && t.trim())).map(t => t.trim())));
+    conv.tags = uniqueTags;
+    this.saveConversationsToDisk();
+
+    // Sincroniza também no banco de contatos classificados
+    const contact = this.classifiedContacts.get(cleanId);
+    if (contact) {
+      contact.tags = uniqueTags;
+      this.saveContactsDatabase();
+    }
+
+    this.logger.log(`Etiquetas atualizadas para "${cleanId}": [${uniqueTags.join(', ')}].`);
+    return conv;
+  }
+
+  getAvailableTags(): TagDefinition[] {
+    if (!this.tags || this.tags.length === 0) {
+      this.loadTags();
+    }
+    return this.tags;
+  }
+
+  addOrUpdateTag(data: { id?: string; name: string; color?: string }): TagDefinition {
+    const name = (data.name || '').trim();
+    if (!name) throw new Error('Nome da etiqueta é obrigatório.');
+
+    const color = data.color || '#3b82f6';
+    const id = data.id || name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+
+    if (!this.tags || this.tags.length === 0) {
+      this.loadTags();
+    }
+
+    const existingIndex = this.tags.findIndex(t => t.id === id);
+    let tag: TagDefinition;
+    if (existingIndex >= 0) {
+      this.tags[existingIndex] = {
+        ...this.tags[existingIndex],
+        name,
+        color,
+      };
+      tag = this.tags[existingIndex];
+    } else {
+      tag = { id, name, color };
+      this.tags.push(tag);
+    }
+    this.saveTags();
+    return tag;
+  }
+
+  deleteTag(tagId: string): boolean {
+    if (!this.tags || this.tags.length === 0) {
+      this.loadTags();
+    }
+    const initialLen = this.tags.length;
+    this.tags = this.tags.filter(t => t.id !== tagId);
+    if (this.tags.length !== initialLen) {
+      this.saveTags();
+      return true;
+    }
+    return false;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⚡ MENSAGENS RÁPIDAS / MODELOS PERSONALIZADOS
+  // ═══════════════════════════════════════════════════════════════════
+
+  private loadQuickMessages() {
+    try {
+      const file = this.getQuickMessagesFilePath();
+      if (fs.existsSync(file)) {
+        const raw = fs.readFileSync(file, 'utf8');
+        const list: QuickMessage[] = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          this.quickMessages = list;
+          this.logger.log(`Mensagens rápidas carregadas: ${this.quickMessages.length} modelos registrados.`);
+          return;
+        }
+      }
+    } catch (e: any) {
+      this.logger.error(`Erro ao carregar whatsapp_quick_messages.json: ${e?.message}`);
+    }
+    this.quickMessages = [...DEFAULT_WHATSAPP_QUICK_MESSAGES];
+    this.saveQuickMessages();
+  }
+
+  private saveQuickMessages() {
+    try {
+      fs.writeFileSync(this.getQuickMessagesFilePath(), JSON.stringify(this.quickMessages || [], null, 2), 'utf8');
+    } catch (e: any) {
+      this.logger.error(`Erro ao salvar whatsapp_quick_messages.json: ${e?.message}`);
+    }
+  }
+
+  getQuickMessages(): QuickMessage[] {
+    if (this.quickMessages === undefined) {
+      this.loadQuickMessages();
+    }
+    return this.quickMessages || [];
+  }
+
+  saveQuickMessage(data: Partial<QuickMessage>): QuickMessage {
+    if (this.quickMessages === undefined) {
+      this.loadQuickMessages();
+    }
+    if (!this.quickMessages) this.quickMessages = [];
+
+    const title = (data.title || '').trim();
+    const content = (data.content || '').trim();
+    if (!title || !content) {
+      throw new Error('Título e conteúdo são obrigatórios para a mensagem rápida.');
+    }
+
+    let id = data.id?.trim();
+    if (!id) {
+      id = 'qm_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    }
+
+    let shortcut = data.shortcut?.trim() || '';
+    if (shortcut && !shortcut.startsWith('/')) {
+      shortcut = '/' + shortcut;
+    }
+
+    const category = data.category?.trim() || 'Geral';
+
+    const existingIndex = this.quickMessages.findIndex(m => m.id === id);
+    let qm: QuickMessage;
+    if (existingIndex >= 0) {
+      this.quickMessages[existingIndex] = {
+        ...this.quickMessages[existingIndex],
+        title,
+        shortcut,
+        content,
+        category,
+        updatedAt: Date.now(),
+      };
+      qm = this.quickMessages[existingIndex];
+    } else {
+      qm = {
+        id,
+        title,
+        shortcut,
+        content,
+        category,
+        updatedAt: Date.now(),
+      };
+      this.quickMessages.push(qm);
+    }
+    this.saveQuickMessages();
+    return qm;
+  }
+
+  deleteQuickMessage(id: string): boolean {
+    if (this.quickMessages === undefined) {
+      this.loadQuickMessages();
+    }
+    if (!this.quickMessages) this.quickMessages = [];
+    const initialLen = this.quickMessages.length;
+    this.quickMessages = this.quickMessages.filter(m => m.id !== id);
+    if (this.quickMessages.length !== initialLen) {
+      this.saveQuickMessages();
+      return true;
+    }
+    return false;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 📅 MENSAGENS AGENDADAS & FOLLOW-UP AUTOMÁTICO
+  // ═══════════════════════════════════════════════════════════════════
+
+  private getScheduledMessagesFilePath(): string {
+    return path.join(this.getDataDir(), 'whatsapp_scheduled_messages.json');
+  }
+
+  private loadScheduledMessages() {
+    try {
+      const file = this.getScheduledMessagesFilePath();
+      if (fs.existsSync(file)) {
+        const raw = fs.readFileSync(file, 'utf8');
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          this.scheduledMessages = list;
+          this.logger.log(`Mensagens agendadas carregadas: ${this.scheduledMessages.length} registros.`);
+          return;
+        }
+      }
+    } catch (e: any) {
+      this.logger.error(`Erro ao carregar whatsapp_scheduled_messages.json: ${e?.message}`);
+    }
+    this.scheduledMessages = [];
+  }
+
+  private saveScheduledMessages() {
+    try {
+      fs.writeFileSync(this.getScheduledMessagesFilePath(), JSON.stringify(this.scheduledMessages, null, 2), 'utf8');
+    } catch (e: any) {
+      this.logger.error(`Erro ao salvar whatsapp_scheduled_messages.json: ${e?.message}`);
+    }
+  }
+
+  getScheduledMessages(filter?: { conversationId?: string; status?: string }): ScheduledMessage[] {
+    if (!this.scheduledMessages) {
+      this.loadScheduledMessages();
+    }
+    let list = [...this.scheduledMessages];
+    if (filter?.conversationId) {
+      const clean = this.extractCleanId(filter.conversationId);
+      list = list.filter(m => this.extractCleanId(m.conversationId) === clean || this.extractCleanId(m.phone) === clean);
+    }
+    if (filter?.status) {
+      list = list.filter(m => m.status === filter.status);
+    }
+    return list.sort((a, b) => a.scheduledFor - b.scheduledFor);
+  }
+
+  saveScheduledMessage(data: Partial<ScheduledMessage>): ScheduledMessage {
+    if (!this.scheduledMessages) {
+      this.loadScheduledMessages();
+    }
+    const text = (data.text || '').trim();
+    if (!text) {
+      throw new Error('Texto da mensagem agendada é obrigatório.');
+    }
+    if (!data.scheduledFor || data.scheduledFor <= Date.now()) {
+      throw new Error('Data e horário de agendamento devem ser no futuro.');
+    }
+
+    const id = data.id || 'sch_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    const conversationId = data.conversationId || data.phone || '';
+    const phone = data.phone || data.conversationId || '';
+
+    const scheduled: ScheduledMessage = {
+      id,
+      conversationId,
+      phone,
+      contactName: data.contactName,
+      jid: data.jid,
+      text,
+      scheduledFor: data.scheduledFor,
+      createdAt: data.createdAt || Date.now(),
+      status: 'pending',
+      type: data.type || 'manual_schedule',
+      attendantName: data.attendantName,
+    };
+
+    const idx = this.scheduledMessages.findIndex(m => m.id === id);
+    if (idx >= 0) {
+      this.scheduledMessages[idx] = { ...this.scheduledMessages[idx], ...scheduled };
+    } else {
+      this.scheduledMessages.push(scheduled);
+    }
+    this.saveScheduledMessages();
+    return scheduled;
+  }
+
+  cancelScheduledMessage(id: string): boolean {
+    if (!this.scheduledMessages) {
+      this.loadScheduledMessages();
+    }
+    const msg = this.scheduledMessages.find(m => m.id === id);
+    if (msg && msg.status === 'pending') {
+      msg.status = 'canceled';
+      this.saveScheduledMessages();
+      return true;
+    }
+    return false;
+  }
+
+  deleteScheduledMessage(id: string): boolean {
+    if (!this.scheduledMessages) {
+      this.loadScheduledMessages();
+    }
+    const prevLen = this.scheduledMessages.length;
+    this.scheduledMessages = this.scheduledMessages.filter(m => m.id !== id);
+    if (this.scheduledMessages.length !== prevLen) {
+      this.saveScheduledMessages();
+      return true;
+    }
+    return false;
+  }
+
+  updateScheduledMessageStatus(id: string, status: 'sent' | 'canceled' | 'failed', error?: string): boolean {
+    if (!this.scheduledMessages) {
+      this.loadScheduledMessages();
+    }
+    const msg = this.scheduledMessages.find(m => m.id === id);
+    if (msg) {
+      msg.status = status;
+      if (status === 'sent') msg.sentAt = Date.now();
+      if (error) msg.error = error;
+      this.saveScheduledMessages();
+      return true;
+    }
+    return false;
+  }
+
+  saveMessageTranscription(conversationId: string, messageId: string, transcription: string): boolean {
+    const clean = this.extractCleanId(conversationId);
+    const conv = this.conversations.get(clean);
+    if (conv && conv.messages) {
+      const msg = conv.messages.find(m => m.id === messageId);
+      if (msg) {
+        msg.transcription = transcription;
+        this.saveConversationsToDisk();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  getAttendanceReport() {
+    const list = Array.from(this.conversations.values());
+    const now = Date.now();
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const startOfDayTs = startOfDay.getTime();
+
+    const startOfWeek = new Date();
+    const day = startOfWeek.getDay();
+    const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+    startOfWeek.setDate(diff);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const startOfWeekTs = startOfWeek.getTime();
+
+    let totalClients = 0;
+    let answeredCount = 0;
+    let answeredByBot = 0;
+    let answeredByHuman = 0;
+    let vacuumCount = 0;
+    let unreadCount = 0;
+    let messagedToday = 0;
+    let messagedThisWeek = 0;
+    let totalClientMessages = 0;
+    let totalResponses = 0;
+
+    const vacuumList: Array<{
+      id: string;
+      phone: string;
+      name: string;
+      lastMessageSnippet: string;
+      lastInteractionAt: number;
+      waitMinutes: number;
+      waitHours: string;
+      urgency: 'critical' | 'warning' | 'normal';
+    }> = [];
+
+    const unreadList: Array<{
+      id: string;
+      phone: string;
+      name: string;
+      lastMessageSnippet: string;
+      lastInteractionAt: number;
+      unreadCount: number;
+    }> = [];
+
+    const attendantsActivity: Record<string, number> = {};
+
+    // Dias da semana para gráfico dos últimos 7 dias
+    const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    const weekDaysMap: Record<string, { dia: string; mensagens: number; respondidos: number; vacuo: number }> = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now - i * 86400000);
+      const name = dayNames[d.getDay()];
+      weekDaysMap[name] = { dia: name, mensagens: 0, respondidos: 0, vacuo: 0 };
+    }
+
+    for (const c of list) {
+      const resolved = this.resolveRealPhone(c.phone || c.id || c.jid);
+      const displayPhone = resolved.displayPhone || c.phone || c.id;
+      let displayName = c.name;
+      if (!displayName || (displayName.startsWith('Contato ') && displayName.length > 15)) {
+        displayName = `Cliente (${displayPhone})`;
+      }
+
+      const hasClientMsg = (c.messages || []).some(m => m.sender === 'client') || c.lastMessageSender === 'client';
+      if (!hasClientMsg && (!c.messages || c.messages.length === 0)) continue;
+
+      totalClients++;
+
+      for (const m of (c.messages || [])) {
+        if (m.sender === 'client') {
+          totalClientMessages++;
+        } else if (m.sender === 'bot') {
+          totalResponses++;
+        } else if (m.sender === 'human') {
+          totalResponses++;
+          // Assinatura no formato *<Título> <Nome>:* — o título é personalizável em Configurações
+          const match = (m.text || '').match(/^\s*\*[^\s*:]+\s+([^*\n]+?):?\*:?/);
+          const attName = match ? match[1].trim() : 'Atendente Geral';
+          attendantsActivity[attName] = (attendantsActivity[attName] || 0) + 1;
+        }
+
+        const msgDay = dayNames[new Date(m.timestamp || c.lastInteractionAt).getDay()];
+        if (weekDaysMap[msgDay]) {
+          if (m.sender === 'client') {
+            weekDaysMap[msgDay].mensagens++;
+          } else {
+            weekDaysMap[msgDay].respondidos++;
+          }
+        }
+      }
+
+      if (c.lastInteractionAt >= startOfDayTs) {
+        messagedToday++;
+      }
+      if (c.lastInteractionAt >= startOfWeekTs) {
+        messagedThisWeek++;
+      }
+
+      const isUnread = (c.unreadCount && c.unreadCount > 0) || (c.lastMessageSender === 'client' && c.isRead === false);
+      if (isUnread) {
+        unreadCount++;
+        unreadList.push({
+          id: c.id,
+          phone: displayPhone,
+          name: displayName,
+          lastMessageSnippet: c.lastMessageSnippet || 'Mensagem não lida...',
+          lastInteractionAt: c.lastInteractionAt,
+          unreadCount: c.unreadCount || 1,
+        });
+      }
+
+      if (c.lastMessageSender === 'client') {
+        vacuumCount++;
+        const waitMs = Math.max(0, now - c.lastInteractionAt);
+        const waitMinutes = Math.floor(waitMs / (1000 * 60));
+        const waitHours = (waitMs / (1000 * 60 * 60)).toFixed(1);
+
+        let urgency: 'critical' | 'warning' | 'normal' = 'normal';
+        if (waitMinutes >= 120) urgency = 'critical';
+        else if (waitMinutes >= 30) urgency = 'warning';
+
+        vacuumList.push({
+          id: c.id,
+          phone: displayPhone,
+          name: displayName,
+          lastMessageSnippet: c.lastMessageSnippet || 'Aguardando atendimento...',
+          lastInteractionAt: c.lastInteractionAt,
+          waitMinutes,
+          waitHours,
+          urgency,
+        });
+
+        const lastDay = dayNames[new Date(c.lastInteractionAt).getDay()];
+        if (weekDaysMap[lastDay]) {
+          weekDaysMap[lastDay].vacuo++;
+        }
+      } else {
+        answeredCount++;
+        if (c.lastMessageSender === 'human') {
+          answeredByHuman++;
+        } else {
+          answeredByBot++;
+        }
+      }
+    }
+
+    vacuumList.sort((a, b) => b.waitMinutes - a.waitMinutes);
+    unreadList.sort((a, b) => b.lastInteractionAt - a.lastInteractionAt);
+
+    const weeklyDistributionData = Object.values(weekDaysMap);
+
+    return {
+      totalClients,
+      totalClientMessages,
+      totalResponses,
+      answeredCount,
+      answeredByBot,
+      answeredByHuman,
+      vacuumCount,
+      unreadCount,
+      messagedToday,
+      messagedThisWeek,
+      vacuumList,
+      unreadList,
+      weeklyDistributionData,
+      attendantsActivity,
+      responseRate: totalClients > 0 ? +((answeredCount / totalClients) * 100).toFixed(1) : 100,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -781,21 +2156,34 @@ export class ConversationBrainService {
     jid: string, 
     text: string, 
     pushName?: string, 
-    leadInfo?: any
-  ): ClientConversation {
+    leadInfo?: any,
+    mediaType?: 'image' | 'audio' | 'document' | 'video',
+    mediaUrl?: string,
+    baileysId?: string
+  ): ClientConversation | null {
+    // BLINDAGEM TOTAL: Ignorar absolutamente qualquer grupo ou broadcast
+    if (isGroupOrBroadcastJid(jid)) return null;
+
+    // Se este ID de mensagem foi apagado anteriormente, JAMAIS adiciona/ressuscita!
+    if (baileysId && this.deletedMessageIds.has(baileysId)) {
+      return null;
+    }
+
     const cleanId = this.extractCleanId(jid);
     const now = Date.now();
-    let conv = this.conversations.get(cleanId);
+    let conv = this.getConversationRef(jid) || this.conversations.get(cleanId);
 
     const detectedIntent = this.detectIntent(text);
+    const resolvedPhone = this.resolveRealPhone(jid);
+    const displayPhone = resolvedPhone.displayPhone || cleanId;
 
     if (!conv) {
-      const displayName = leadInfo?.name || pushName || `Contato ${cleanId.slice(-4)}`;
+      const displayName = leadInfo?.name || pushName || `Contato ${displayPhone}`;
       conv = {
         id: cleanId,
         jid,
         name: displayName,
-        phone: cleanId,
+        phone: displayPhone,
         status: 'novo',
         interestScore: 20,
         leadTemperature: 'frio',
@@ -807,16 +2195,33 @@ export class ConversationBrainService {
         createdAt: now,
         messagesCount: 0,
         messages: [],
+        unreadCount: 1,
+        isRead: false,
       };
       this.conversations.set(cleanId, conv);
     }
 
-    // Atualiza nome se fornecido agora
-    if (pushName && conv.name.startsWith('Contato ')) {
-      conv.name = pushName;
+    // Atualiza nome se fornecido agora ou se era placeholder
+    if (pushName && pushName.trim()) {
+      const p = pushName.trim();
+      const isPlaceholder = !conv.name || 
+        conv.name.startsWith('Contato ') || 
+        conv.name.startsWith('Cliente ') || 
+        conv.name === 'Lead' || 
+        conv.name === '❣️' || 
+        conv.name.length <= 2 || 
+        conv.name.replace(/\D/g, '').length >= 10;
+      if (isPlaceholder) {
+        conv.name = p;
+      }
     }
     if (leadInfo?.name) {
       conv.name = leadInfo.name;
+    }
+
+    // Sempre garante que o telefone exibido seja o telefone real formatado
+    if (displayPhone && (!conv.phone || conv.phone === cleanId || conv.phone.replace(/\D/g, '').length >= 14)) {
+      conv.phone = displayPhone;
     }
 
     // Atualiza status e temperatura
@@ -824,6 +2229,8 @@ export class ConversationBrainService {
     conv.lastMessageSnippet = text.slice(0, 120);
     conv.lastMessageSender = 'client';
     conv.messagesCount = (conv.messagesCount || 0) + 1;
+    conv.unreadCount = (conv.unreadCount || 0) + 1;
+    conv.isRead = false;
 
     // Detecta e acumula intenções
     if (detectedIntent && !conv.detectedIntents.includes(detectedIntent)) {
@@ -854,12 +2261,25 @@ export class ConversationBrainService {
       conv.businessContext.askedGuarantee = true;
     }
 
+    // DEDUPLICAÇÃO BLINDADA: se esta mensagem exata já foi registrada nesta conversa, não duplica!
+    if (baileysId && conv.messages.some(m => (m.baileysId && m.baileysId === baileysId) || m.id === baileysId)) {
+      return conv;
+    }
+
+    const msgId = baileysId || `msg-${now}-${Math.random().toString(36).substring(2, 6)}`;
+    if (this.deletedMessageIds.has(msgId)) {
+      return conv;
+    }
+
     conv.messages.push({
-      id: `msg-${now}-${Math.random().toString(36).substring(2, 6)}`,
+      id: msgId,
+      baileysId,
       sender: 'client',
       text,
       timestamp: now,
       intentDetected: detectedIntent || undefined,
+      mediaType,
+      mediaUrl,
     });
 
     // Mantém no máximo 50 mensagens em memória por conversa para leveza
@@ -921,23 +2341,87 @@ export class ConversationBrainService {
     }
   }
 
-  recordHumanMessage(jid: string, text: string): void {
+  recordHumanMessage(
+    jid: string, 
+    text: string, 
+    mediaType?: 'image' | 'audio' | 'document' | 'video', 
+    mediaUrl?: string,
+    baileysId?: string
+  ): void {
+    if (isGroupOrBroadcastJid(jid)) return;
+
+    if (baileysId && this.deletedMessageIds.has(baileysId)) {
+      return;
+    }
+
     const cleanId = this.extractCleanId(jid);
-    const conv = this.conversations.get(cleanId);
+    let conv = this.getConversationRef(jid) || this.conversations.get(cleanId);
     const now = Date.now();
+
+    const resolvedPhoneHuman = this.resolveRealPhone(jid);
+    const displayPhoneHuman = resolvedPhoneHuman.displayPhone || cleanId;
+
+    let validJid = jid;
+    if (!validJid.includes('@')) {
+      if (cleanId.length >= 14 && !cleanId.startsWith('55')) {
+        validJid = `${cleanId}@lid`;
+      } else {
+        const d = cleanId.startsWith('55') ? cleanId : `55${cleanId}`;
+        validJid = `${d}@s.whatsapp.net`;
+      }
+    }
+
+    if (!conv) {
+      conv = {
+        id: cleanId,
+        jid: validJid,
+        name: `Contato ${displayPhoneHuman}`,
+        phone: displayPhoneHuman,
+        status: 'atendimento_humano',
+        interestScore: 20,
+        leadTemperature: 'morno',
+        detectedIntents: [],
+        businessContext: {},
+        lastMessageSnippet: text.slice(0, 120),
+        lastMessageSender: 'human',
+        lastInteractionAt: now,
+        createdAt: now,
+        messagesCount: 0,
+        messages: [],
+        unreadCount: 0,
+        isRead: true,
+      };
+      this.conversations.set(cleanId, conv);
+    }
 
     if (conv) {
       conv.status = 'atendimento_humano';
+      if (displayPhoneHuman) { conv.phone = displayPhoneHuman; }
       conv.lastInteractionAt = now;
       conv.lastMessageSnippet = text.slice(0, 120);
       conv.lastMessageSender = 'human';
       conv.messagesCount = (conv.messagesCount || 0) + 1;
+      conv.unreadCount = 0;
+      conv.isRead = true;
+
+      // DEDUPLICAÇÃO BLINDADA
+      if (baileysId && conv.messages.some(m => (m.baileysId && m.baileysId === baileysId) || m.id === baileysId)) {
+        return;
+      }
+
+      const msgId = baileysId || `human-${now}-${Math.random().toString(36).substring(2, 6)}`;
+      if (this.deletedMessageIds.has(msgId)) {
+        return;
+      }
 
       conv.messages.push({
-        id: `human-${now}-${Math.random().toString(36).substring(2, 6)}`,
+        id: msgId,
+        baileysId,
         sender: 'human',
         text,
         timestamp: now,
+        mediaType,
+        mediaUrl,
       });
 
       if (conv.messages.length > 50) {

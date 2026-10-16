@@ -18,7 +18,10 @@ import {
   Users, 
   CheckCircle2,
   Sparkles,
-  Flame
+  Flame,
+  LayoutGrid,
+  TableProperties,
+  Layers
 } from 'lucide-react';
 import { useState, useMemo } from 'react';
 
@@ -29,6 +32,8 @@ export default function PipelinePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSegment, setSelectedSegment] = useState('all');
   const [selectedPriority, setSelectedPriority] = useState('all');
+  const [viewMode, setViewMode] = useState<'focused' | 'compact' | 'table'>('table');
+  const [selectedStageId, setSelectedStageId] = useState<string>('all');
 
   // Modal states
   const [selectedLeadForCrm, setSelectedLeadForCrm] = useState<LeadListItem | null>(null);
@@ -136,9 +141,9 @@ export default function PipelinePage() {
     return (
       <div className="space-y-4 h-full flex flex-col">
         <div className="h-20 bg-card rounded-2xl border border-border animate-pulse" />
-        <div className="flex gap-4 flex-1 overflow-x-auto pb-4">
-          {Array.from({ length: 7 }).map((_, i) => (
-            <div key={i} className="min-w-[310px] bg-card rounded-2xl border border-border animate-pulse h-full" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 flex-1 pb-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="w-full bg-card rounded-2xl border border-border animate-pulse h-full min-h-[300px]" />
           ))}
         </div>
       </div>
@@ -157,7 +162,7 @@ export default function PipelinePage() {
             </span>
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Gestão ativa de clientes e negociações comerciais. Clique no card para abrir o CRM ou arraste para avançar no funil.
+            Gestão ativa do funil comercial. Altere o estágio de cada cliente diretamente na lista gerencial com 1 clique, sem precisar arrastar.
           </p>
         </div>
 
@@ -168,45 +173,45 @@ export default function PipelinePage() {
             className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold gap-1.5 shadow-md"
           >
             <Plus className="w-4 h-4" />
-            + Nova Oportunidade no CRM
+            + Nova Oportunidade
           </Button>
         </div>
       </div>
 
-      {/* Cards de Métricas do Pipeline */}
+      {/* Cards de Métricas Operacionais do Pipeline */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-2xl bg-card border border-border flex items-center gap-3 shadow-sm">
-          <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500 shrink-0">
-            <DollarSign className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[11px] text-muted-foreground font-medium">Total no CRM</p>
-            <h4 className="text-base sm:text-lg font-black text-foreground font-mono truncate">
-              {formatCurrency(pipelineMetrics.totalValue)}
-            </h4>
-          </div>
-        </div>
-
         <div className="p-3.5 rounded-2xl bg-card border border-border flex items-center gap-3 shadow-sm">
           <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
             <Users className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[11px] text-muted-foreground font-medium">Oportunidades no CRM</p>
+            <p className="text-[11px] text-muted-foreground font-medium">Total de Oportunidades</p>
             <h4 className="text-base sm:text-lg font-black text-foreground font-mono truncate">
-              {pipelineMetrics.totalLeads} clientes
+              {pipelineMetrics.totalLeads} {pipelineMetrics.totalLeads === 1 ? 'cliente' : 'clientes'}
+            </h4>
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-card border border-border flex items-center gap-3 shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500 shrink-0">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] text-muted-foreground font-medium">Etapas Ativas</p>
+            <h4 className="text-base sm:text-lg font-black text-foreground font-mono truncate">
+              {stages?.length || 0} estágios
             </h4>
           </div>
         </div>
 
         <div className="p-3.5 rounded-2xl bg-card border border-border flex items-center gap-3 shadow-sm">
           <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
-            <TrendingUp className="w-5 h-5" />
+            <Flame className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[11px] text-muted-foreground font-medium">Ticket Médio Estimado</p>
+            <p className="text-[11px] text-muted-foreground font-medium">Alta Prioridade</p>
             <h4 className="text-base sm:text-lg font-black text-foreground font-mono truncate">
-              {formatCurrency(pipelineMetrics.avgTicket)}
+              {stages?.flatMap(s => s.leads).filter(l => l.priority === 'HIGH').length || 0} leads
             </h4>
           </div>
         </div>
@@ -218,7 +223,7 @@ export default function PipelinePage() {
           <div className="min-w-0">
             <p className="text-[11px] text-muted-foreground font-medium">Contratos Ganhos / Fechados</p>
             <h4 className="text-base sm:text-lg font-black text-emerald-400 font-mono truncate">
-              {formatCurrency(pipelineMetrics.closedValue)}
+              {stages?.find(s => s.slug === 'fechado' || s.name.toLowerCase().includes('fechado') || s.name.toLowerCase().includes('ganho'))?.leads.length || 0} fechados
             </h4>
           </div>
         </div>
@@ -282,11 +287,102 @@ export default function PipelinePage() {
           </Button>
         )}
       </div>
+
+      {/* Navegador de Estrutura & Seletor de Visualização (Totalmente Centrado e Sem Barra de Arrastar) */}
+      <div className="flex flex-col md:flex-row items-center justify-between gap-3 bg-card/60 p-2.5 rounded-2xl border border-border shadow-xs">
+        {/* Seletor de Modo de Exibição */}
+        <div className="flex items-center gap-1 bg-background/80 p-1 rounded-xl border border-border/80 shrink-0">
+          <button
+            type="button"
+            onClick={() => setViewMode('table')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              viewMode === 'table'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            }`}
+          >
+            <TableProperties className="w-3.5 h-3.5" />
+            Lista Gerencial (Prática)
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('focused')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              viewMode === 'focused'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            Focado por Etapa
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('compact')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              viewMode === 'compact'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            }`}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            Quadro Geral
+          </button>
+        </div>
+
+        {/* Seletor Rápido de Etapas Centrado (Pills) */}
+        <div className="flex items-center justify-center gap-1.5 overflow-x-auto py-0.5 no-scrollbar flex-wrap">
+          <button
+            type="button"
+            onClick={() => setSelectedStageId('all')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all border ${
+              selectedStageId === 'all'
+                ? 'bg-foreground text-background border-foreground font-bold shadow-sm'
+                : 'bg-background/60 text-muted-foreground border-border hover:bg-muted/50 hover:text-foreground'
+            }`}
+          >
+            <span>Todas as Etapas</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted text-muted-foreground">
+              {pipelineMetrics.totalLeads}
+            </span>
+          </button>
+
+          {filteredStages.map((stage) => {
+            const isSelected = selectedStageId === stage.id;
+            return (
+              <button
+                key={stage.id}
+                type="button"
+                onClick={() => setSelectedStageId(stage.id)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all border ${
+                  isSelected
+                    ? 'border-primary bg-primary/10 text-primary font-bold shadow-sm ring-1 ring-primary/30'
+                    : 'bg-background/60 text-muted-foreground border-border hover:bg-muted/50 hover:text-foreground'
+                }`}
+              >
+                <span 
+                  className="w-2 h-2 rounded-full shrink-0" 
+                  style={{ backgroundColor: stage.color }} 
+                />
+                <span className="truncate max-w-[120px]">{stage.name}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                  isSelected ? 'bg-primary/20 text-primary font-bold' : 'bg-muted text-muted-foreground'
+                }`}>
+                  {stage.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       
       {/* Quadro Kanban Interativo */}
       <div className="flex-1 overflow-hidden">
         <KanbanBoard 
           stages={filteredStages} 
+          viewMode={viewMode}
+          selectedStageId={selectedStageId}
+          onSelectStage={setSelectedStageId}
           onDragEnd={handleDragEnd}
           onMoveStage={handleDragEnd}
           onSelectLead={handleOpenLeadCrm}

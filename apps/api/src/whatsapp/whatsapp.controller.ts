@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Req, UseGuards, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, UseGuards, Headers, BadRequestException, NotFoundException } from '@nestjs/common';
 import { WhatsappService } from './whatsapp.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -49,6 +49,31 @@ export class WhatsappController {
     return {
       success: true,
       data,
+    };
+  }
+
+  @Post('auto-reply/universal')
+  toggleUniversalAutoReply(@Body() body: { enabled: boolean; flowId?: string }) {
+    const enabled = Boolean(body?.enabled);
+    if (enabled) {
+      // Religa o fluxo de conversa (sem fluxo ativo o robô fica mudo mesmo com auto-reply ligado)
+      const flow = this.botFlowService.restoreActiveFlow(body?.flowId);
+      if (!flow) {
+        throw new BadRequestException('Nenhum fluxo de atendimento com etapas foi encontrado. Crie ou edite um fluxo em "Fluxos" antes de ligar o robô.');
+      }
+      const data = this.whatsappService.setAutoReplyEnabled(true, 'universal');
+      return {
+        success: true,
+        data: { ...data, isFlowActive: true, activeFlowId: flow.id, activeFlowName: flow.name },
+        message: `Robô de atendimento ATIVADO universalmente (fluxo "${flow.name}").`,
+      };
+    }
+    this.botFlowService.deactivateFlow('all');
+    const data = this.whatsappService.setAutoReplyEnabled(false, 'universal');
+    return {
+      success: true,
+      data: { ...data, isFlowActive: false, activeFlowId: '' },
+      message: 'Robô de atendimento DESATIVADO universalmente.',
     };
   }
 
@@ -359,12 +384,33 @@ export class WhatsappController {
   }
 
   @Post('flows/:id/activate')
-  activateFlow(@Param('id') id: string) {
+  activateFlow(@Param('id') id: string, @Headers('x-device-id') deviceId?: string) {
+    const target = this.botFlowService.getFlowById(id);
+    if (!target || id === 'all') throw new NotFoundException('Fluxo não encontrado.');
+    if (!Array.isArray(target.steps) || target.steps.length === 0) {
+      throw new BadRequestException('Adicione pelo menos uma etapa antes de ativar o robô.');
+    }
     const flow = this.botFlowService.setActiveFlow(id);
+    this.whatsappService.setAutoReplyEnabled(true, deviceId);
     return {
       success: !!flow,
       data: flow,
       message: flow ? `Fluxo "${flow.name}" ativado com sucesso para o robô!` : 'Fluxo não encontrado.',
+    };
+  }
+
+  @Post('flows/:id/deactivate')
+  deactivateFlow(@Param('id') id: string, @Headers('x-device-id') deviceId?: string) {
+    if (id !== 'all' && !this.botFlowService.getFlowById(id)) {
+      throw new NotFoundException('Fluxo não encontrado.');
+    }
+    this.botFlowService.deactivateFlow(id);
+    if (!this.botFlowService.isBotActive()) {
+      this.whatsappService.setAutoReplyEnabled(false, deviceId);
+    }
+    return {
+      success: true,
+      message: this.botFlowService.isBotActive() ? 'Fluxo desativado.' : 'Robô silenciado globalmente.',
     };
   }
 
@@ -468,6 +514,32 @@ export class WhatsappController {
     };
   }
 
+  @Get('conversations/metrics/attendance-report')
+  getAttendanceReport() {
+    return {
+      success: true,
+      data: this.conversationBrain.getAttendanceReport(),
+    };
+  }
+
+  @Post('conversations/:id/read')
+  markConversationAsRead(@Param('id') id: string) {
+    const success = this.conversationBrain.markConversationAsRead(id);
+    return {
+      success,
+      message: success ? 'Conversa marcada como lida.' : 'Conversa não encontrada.',
+    };
+  }
+
+  @Post('conversations/:id/unread')
+  markConversationAsUnread(@Param('id') id: string) {
+    const success = this.conversationBrain.markConversationAsUnread(id);
+    return {
+      success,
+      message: success ? 'Conversa marcada como não lida.' : 'Conversa não encontrada.',
+    };
+  }
+
   @Get('conversations/:id')
   getConversationById(@Param('id') id: string) {
     const conv = this.conversationBrain.getConversation(id);
@@ -486,12 +558,168 @@ export class WhatsappController {
     };
   }
 
+  @Post('conversations/:id/rename')
+  @Patch('conversations/:id/rename')
+  renameContact(
+    @Param('id') id: string,
+    @Body() body: { name: string },
+  ) {
+    if (!body?.name?.trim()) throw new BadRequestException('Nome do contato é obrigatório');
+    const conv = this.conversationBrain.updateContactName(id, body.name.trim());
+    return {
+      success: !!conv,
+      message: conv ? `Nome atualizado para "${body.name.trim()}".` : 'Conversa não encontrada.',
+      data: conv,
+    };
+  }
+
+  @Patch('conversations/:id/contact')
+  @Post('conversations/:id/contact')
+  updateContact(
+    @Param('id') id: string,
+    @Body() body: { name?: string; phone?: string; notes?: string; contactType?: any; crmStage?: string },
+  ) {
+    const success = this.conversationBrain.updateConversationContact(id, body);
+    return {
+      success,
+      message: success ? 'Contato atualizado com sucesso.' : 'Conversa não encontrada.',
+      data: this.conversationBrain.getConversation(id),
+    };
+  }
+
+  @Put('conversations/:id/messages/:messageId')
+  editMessage(
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() body: { text: string },
+  ) {
+    if (!body?.text) throw new BadRequestException('Texto da mensagem é obrigatório');
+    const success = this.conversationBrain.editMessage(id, messageId, body.text);
+    return {
+      success,
+      message: success ? 'Mensagem editada com sucesso.' : 'Mensagem não encontrada.',
+    };
+  }
+
+  @Delete('conversations/:id/messages/:messageId')
+  async deleteMessage(
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Req() req: any,
+    @Headers('x-device-id') deviceId?: string,
+  ) {
+    const forEveryone = req.query?.forEveryone === 'true' || req.body?.forEveryone === true;
+    
+    // Procura a mensagem para obter baileysId se existir
+    const conv = this.conversationBrain.getConversation(id);
+    const msg = conv?.messages?.find(m => m.id === messageId || (m as any).baileysId === messageId);
+    const baileysId = (msg as any)?.baileysId || messageId;
+    const targetJid = conv?.jid || id;
+
+    const success = this.conversationBrain.deleteMessage(id, messageId, forEveryone);
+
+    if (forEveryone && baileysId) {
+      // Dispara revoke no WhatsApp para remover do aparelho do cliente
+      this.whatsappService.revokeMessage(targetJid, baileysId, deviceId).catch(() => {});
+    }
+
+    return {
+      success,
+      message: success ? 'Mensagem excluída com sucesso.' : 'Mensagem não encontrada.',
+    };
+  }
+
+  @Delete('conversations/:id/messages')
+  clearConversationMessages(@Param('id') id: string) {
+    const success = this.conversationBrain.clearConversationMessages(id);
+    return {
+      success,
+      message: success ? 'Mensagens da conversa limpas com sucesso.' : 'Conversa não encontrada.',
+    };
+  }
+
+  @Post('conversations/:id/messages/:messageId/pin')
+  togglePinMessage(
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+  ) {
+    const success = this.conversationBrain.togglePinMessage(id, messageId);
+    return {
+      success,
+      message: success ? 'Status de fixação alterado.' : 'Mensagem não encontrada.',
+    };
+  }
+
+  @Post('conversations/:id/messages/:messageId/star')
+  toggleStarMessage(
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+  ) {
+    const success = this.conversationBrain.toggleStarMessage(id, messageId);
+    return {
+      success,
+      message: success ? 'Status de favorito alterado.' : 'Mensagem não encontrada.',
+    };
+  }
+
+  @Post('conversations/:id/messages/:messageId/react')
+  reactToMessage(
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() body: { emoji: string },
+  ) {
+    if (!body?.emoji) throw new BadRequestException('Emoji é obrigatório');
+    const success = this.conversationBrain.reactToMessage(id, messageId, body.emoji);
+    return {
+      success,
+      message: success ? 'Reação atualizada.' : 'Mensagem não encontrada.',
+    };
+  }
+
   @Delete('conversations')
   clearAllConversations() {
     this.conversationBrain.clearAllConversations();
     return {
       success: true,
       message: 'Banco de dados de conversas limpo com sucesso.',
+    };
+  }
+
+  @Post('reset-client-history')
+  resetClientHistory() {
+    const result = this.conversationBrain.clearAllClientHistory();
+    this.whatsappService.clearDispatchedHistory();
+    return {
+      success: true,
+      data: result,
+      message: 'Todo o histórico de clientes e conversas foi limpo com sucesso.',
+    };
+  }
+
+  @Get('quick-messages')
+  getQuickMessages() {
+    return {
+      success: true,
+      data: this.conversationBrain.getQuickMessages(),
+    };
+  }
+
+  @Post('quick-messages')
+  saveQuickMessage(@Body() body: any) {
+    const qm = this.conversationBrain.saveQuickMessage(body);
+    return {
+      success: true,
+      data: qm,
+      message: 'Mensagem rápida salva com sucesso.',
+    };
+  }
+
+  @Delete('quick-messages/:id')
+  deleteQuickMessage(@Param('id') id: string) {
+    const success = this.conversationBrain.deleteQuickMessage(id);
+    return {
+      success,
+      message: success ? 'Mensagem rápida excluída com sucesso.' : 'Mensagem rápida não encontrada.',
     };
   }
 
@@ -506,18 +734,64 @@ export class WhatsappController {
 
   @Post('conversations/reply')
   async replyToConversation(
-    @Body() body: { to: string; text: string; jid?: string },
+    @Body() body: { to?: string; text?: string; jid?: string; imageBase64OrUrl?: string; audioBase64?: string; audioBase64OrUrl?: string },
     @Headers('x-device-id') deviceId?: string,
   ) {
-    if (!body.to || !body.text) {
-      return { success: false, message: 'Destinatário e mensagem são obrigatórios.' };
+    return this.executeConversationReply(undefined, body, deviceId);
+  }
+
+  @Post('conversations/:id/reply')
+  async replyToConversationWithId(
+    @Param('id') id: string,
+    @Body() body: { to?: string; text?: string; jid?: string; imageBase64OrUrl?: string; audioBase64?: string; audioBase64OrUrl?: string },
+    @Headers('x-device-id') deviceId?: string,
+  ) {
+    return this.executeConversationReply(id, body, deviceId);
+  }
+
+  private async executeConversationReply(
+    paramId?: string,
+    body?: { to?: string; text?: string; jid?: string; imageBase64OrUrl?: string; audioBase64?: string; audioBase64OrUrl?: string },
+    deviceId?: string,
+  ) {
+    const rawTarget = body?.jid || body?.to || paramId;
+    if (!rawTarget) {
+      return { success: false, message: 'Destinatário não informado.' };
     }
-    const target = body.jid || body.to;
-    const result = await this.whatsappService.sendMessage(target, body.text, undefined, 'service', deviceId);
+    const audioPayload = body?.audioBase64 || body?.audioBase64OrUrl;
+    const text = body?.text || (audioPayload ? '[Áudio]' : (body?.imageBase64OrUrl ? '[Imagem]' : ''));
+    if (!text && !body?.imageBase64OrUrl && !audioPayload) {
+      return { success: false, message: 'Mensagem vazia.' };
+    }
+
+    // Tentar resolver o JID da conversa caso não tenha @
+    let target = rawTarget;
+    if (!target.includes('@')) {
+      const conv = this.conversationBrain.getConversation(rawTarget) 
+        || (paramId ? this.conversationBrain.getConversation(paramId) : undefined);
+      if (conv?.jid) {
+        target = conv.jid;
+      }
+    }
+
+    const result = await this.whatsappService.sendMessage(
+      target, 
+      text, 
+      body?.imageBase64OrUrl, 
+      'service', 
+      deviceId,
+      audioPayload
+    );
+
     if (result.success) {
       try {
-        this.conversationBrain.recordHumanMessage(target, body.text);
+        const mediaType = audioPayload ? 'audio' : (body?.imageBase64OrUrl ? 'image' : undefined);
+        const mediaUrl = audioPayload || body?.imageBase64OrUrl;
+        this.conversationBrain.recordHumanMessage(target, text, mediaType, mediaUrl, (result as any).messageId);
         this.whatsappService.registerHumanIntervention(target);
+        if (paramId && paramId !== target) {
+          this.whatsappService.registerHumanIntervention(paramId);
+        }
       } catch {}
     }
     return result;
@@ -626,5 +900,3 @@ export class WhatsappController {
     };
   }
 }
-
-

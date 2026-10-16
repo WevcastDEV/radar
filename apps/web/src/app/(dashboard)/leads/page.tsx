@@ -1,6 +1,6 @@
 'use client';
 
-import { useLeads, useDeleteLead, useUpdateLead, useCreateLead, useBatchUpdateLeads, verifyLeadsWhatsApp } from '@/hooks/use-leads';
+import { useLeads, useDeleteLead, useUpdateLead, useCreateLead, useBatchUpdateLeads, verifyLeadsWhatsApp, clearAllStoredLeads } from '@/hooks/use-leads';
 import { useFilterStore } from '@/stores/filter-store';
 import { FiltersBar } from '@/components/dashboard/filters-bar';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ImportMapsModal } from '@/components/leads/import-maps-modal';
 import { BackupModal } from '@/components/leads/backup-modal';
+import { LeadOutreachModal } from '@/components/leads/lead-outreach-modal';
 import { FolderTopicSelector } from '@/components/leads/folder-topic-selector';
 import { clearAllSystemData } from '@/lib/backup-manager';
 import toast from 'react-hot-toast';
@@ -43,6 +44,8 @@ export default function LeadsPage() {
   const [selectedFolder, setSelectedFolder] = useState<string>('all');
   const [selectedStateFilter, setSelectedStateFilter] = useState<string>('TODOS');
   const [editingLead, setEditingLead] = useState<any>(null);
+  const [outreachLead, setOutreachLead] = useState<any | null>(null);
+  const [outreachTemplate, setOutreachTemplate] = useState<'apresentacao' | 'orcamento' | 'followup' | 'reaquecimento'>('apresentacao');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isVerifyingWhatsApp, setIsVerifyingWhatsApp] = useState(false);
 
@@ -70,6 +73,24 @@ export default function LeadsPage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  const handleClearAllLeads = async () => {
+    const confirmed = await confirm({
+      title: 'Limpar Todos os Leads da Base',
+      description: 'Deseja remover todos os leads e contatos da base? O sistema ficará 100% zerado e pronto para novas prospecções.',
+      confirmText: 'Sim, Limpar Todos os Leads',
+      cancelText: 'Cancelar',
+      variant: 'danger',
+      icon: 'trash',
+    });
+
+    if (confirmed) {
+      clearAllStoredLeads();
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['pipeline'] });
+      toast.success('Todos os leads foram removidos com sucesso! A base está zerada.');
+    }
+  };
 
   const handleClearAllData = async () => {
     const confirmed = await confirm({
@@ -222,21 +243,19 @@ export default function LeadsPage() {
     toast.success(`"${lead.name}" restaurado para a lista ativa!`);
   };
 
-  const handleReheatLead = (lead: any) => {
-    const phone = formatBrazilianPhone(lead.phone || lead.contacts?.[0]?.value || '');
+  const handleOpenOutreach = (lead: any, template: 'apresentacao' | 'orcamento' | 'followup' | 'reaquecimento' = 'apresentacao') => {
+    const rawPhone = lead.phone || lead.contacts?.[0]?.value || '';
+    const phone = formatBrazilianPhone(rawPhone);
     if (!phone) {
       toast.error('Este lead não possui telefone cadastrado');
       return;
     }
-    const cleanDigits = toWhatsAppJidDigits(phone);
-    const firstName = (lead.contactName || lead.name).split(' ')[0];
-    const text = encodeURIComponent(
-      `Olá ${firstName}! Tudo bem?\n\n` +
-      `Aqui é o Weverton da WCTech. Tentei contato anteriormente sobre nossas soluções para a sua empresa.\n\n` +
-      `Como não tive seu retorno, imagino que a rotina esteja corrida. Ainda faz sentido batermos um papo rápido ou prefere que eu encerre os contatos por enquanto?\n\n` +
-      `Fico no seu aguardo!`
-    );
-    window.open(`https://wa.me/${cleanDigits}?text=${text}`, '_blank');
+    setOutreachTemplate(template);
+    setOutreachLead(lead);
+  };
+
+  const handleReheatLead = (lead: any) => {
+    handleOpenOutreach(lead, 'reaquecimento');
   };
 
   const handleBatchMoveToCold = () => {
@@ -446,15 +465,17 @@ export default function LeadsPage() {
             <Database className="w-4 h-4 mr-2 text-primary" />
             Backup & Migração
           </Button>
-          <Button 
-            variant="outline" 
-            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive flex-1 sm:flex-initial" 
-            onClick={handleClearAllData}
-            title="Limpar todos os dados, leads, visitas e clientes do sistema"
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Limpar Tudo
-          </Button>
+          {leads && leads.length > 0 && (
+            <Button 
+              variant="outline" 
+              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive flex-1 sm:flex-initial" 
+              onClick={handleClearAllLeads}
+              title="Remover todos os leads cadastrados e zerar a base"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Limpar Leads
+            </Button>
+          )}
           <Button 
             variant="outline" 
             className="border-red-500/40 text-red-400 hover:bg-red-500/10 hover:border-red-400 flex-1 sm:flex-initial gap-1.5" 
@@ -643,31 +664,35 @@ export default function LeadsPage() {
       {/* Table Container */}
       <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
+          <table className="w-full text-left border-collapse">
             <thead className="text-xs uppercase bg-accent/50 text-muted-foreground border-b border-border">
               <tr>
                 <th className="px-6 py-4">Empresa / Estabelecimento</th>
                 <th className="px-6 py-4">Pasta / Categoria</th>
-                <th className="px-6 py-4 text-center">Score IA</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Localização</th>
                 <th className="px-6 py-4">Contato Direto</th>
-                <th className="px-6 py-4">Valor Estimado</th>
                 <th className="px-6 py-4 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-muted-foreground">
+                  <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
                     Carregando leads...
                   </td>
                 </tr>
               ) : filteredLeads.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-muted-foreground">
-                    <p className="font-medium text-foreground mb-1">Nenhum lead encontrado nesta pasta.</p>
-                    <p className="text-xs">Use o botão "Importar do Google Maps" para prospectar e adicionar novos estabelecimentos.</p>
+                  <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                    <p className="font-semibold text-foreground mb-1">
+                      {(leads?.length || 0) === 0 ? 'Nenhum lead cadastrado ainda.' : 'Nenhum lead encontrado com os filtros atuais.'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {(leads?.length || 0) === 0 
+                        ? 'Sua base de leads está 100% limpa. Clique em "+ Novo Lead" ou "Importar do Google Maps" para começar.'
+                        : 'Ajuste os filtros ou a pasta selecionada para visualizar outros leads.'}
+                    </p>
                   </td>
                 </tr>
               ) : filteredLeads.map((lead: any) => {
@@ -705,19 +730,6 @@ export default function LeadsPage() {
                         <span>{catInfo.badge.split(' ')[0]}</span>
                         <span>{subcategory}</span>
                       </span>
-                    </td>
-
-                    {/* Score */}
-                    <td className="px-6 py-4 text-center">
-                      <div 
-                        className="w-8 h-8 mx-auto rounded-full border-2 flex items-center justify-center font-bold text-xs" 
-                        style={{ 
-                          borderColor: (lead.score?.total || 50) >= 70 ? '#10B981' : '#F59E0B',
-                          color: (lead.score?.total || 50) >= 70 ? '#10B981' : '#F59E0B'
-                        }}
-                      >
-                        {lead.score?.total || 50}
-                      </div>
                     </td>
 
                     {/* Status */}
@@ -760,15 +772,24 @@ export default function LeadsPage() {
                         </div>
                       ) : phone ? (
                         <div className="flex flex-col gap-1">
-                          <a 
-                            href={`https://wa.me/${toWhatsAppJidDigits(phone)}`} 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-emerald-400 font-medium hover:underline"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5" />
-                            {phone}
-                          </a>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenOutreach(lead, 'apresentacao')}
+                              className="inline-flex items-center gap-1 text-emerald-400 font-bold hover:underline cursor-pointer"
+                              title="Personalizar mensagem e chamar no Chat Comercial"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                              {phone}
+                            </button>
+                            <Link
+                              href={`/chat-comercial?phone=${toWhatsAppJidDigits(phone)}`}
+                              className="text-muted-foreground hover:text-emerald-400 p-0.5 rounded transition"
+                              title="Abrir diretamente no Chat Comercial"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </Link>
+                          </div>
                           {lead.hasWhatsApp === true && (
                             <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 w-fit">
                               WhatsApp Ativo
@@ -780,11 +801,6 @@ export default function LeadsPage() {
                       )}
                     </td>
 
-                    {/* Valor Estimado */}
-                    <td className="px-6 py-4 font-semibold text-foreground">
-                      {formatCurrency(lead.potentialValue || 2500)}
-                    </td>
-
                     {/* Ações */}
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center gap-1 justify-end">
@@ -792,13 +808,9 @@ export default function LeadsPage() {
                           <Button 
                             variant="ghost" 
                             size="icon" 
-                            className="h-8 w-8 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
-                            onClick={() => {
-                              const fullPhone = toWhatsAppJidDigits(lead.phone, '92');
-                              const text = `Olá ${lead.name}, tudo bem?`;
-                              window.open(`https://web.whatsapp.com/send?phone=${fullPhone}&text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
-                            }}
-                            title="Abrir diretamente no WhatsApp Web / Desktop deste computador"
+                            className="h-8 w-8 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 cursor-pointer"
+                            onClick={() => handleOpenOutreach(lead, 'apresentacao')}
+                            title="Personalizar mensagem e chamar no Chat Comercial de Vendas"
                           >
                             <MessageSquare className="w-4 h-4" />
                           </Button>
@@ -921,15 +933,6 @@ export default function LeadsPage() {
                   placeholder="Ex: Padaria, Pet Shop, Hotelaria, Odontologia..."
                 />
                 <p className="text-[11px] text-muted-foreground mt-1">Ao definir uma nova categoria, a pasta correspondente será criada e sincronizada automaticamente.</p>
-              </div>
-              <div>
-                <label className="text-sm text-muted-foreground">Valor Potencial Estimado (R$)</label>
-                <input 
-                  type="number" 
-                  className="w-full h-10 bg-background border border-border rounded-md px-3 mt-1" 
-                  value={editingLead.potentialValue || ''}
-                  onChange={(e) => setEditingLead({...editingLead, potentialValue: Number(e.target.value)})}
-                />
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
@@ -1100,22 +1103,8 @@ export default function LeadsPage() {
                 </div>
               </div>
 
-              {/* Linha 4: Valor Potencial e Prioridade */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="text-xs font-bold text-foreground flex items-center gap-1.5 mb-1">
-                    <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                    Valor Estimado do Contrato (R$)
-                  </label>
-                  <input 
-                    type="number" 
-                    className="w-full h-9 bg-background border border-border rounded-lg px-3 text-xs font-bold text-emerald-400 focus:outline-none focus:ring-1 focus:ring-primary" 
-                    value={newLeadForm.potentialValue}
-                    onChange={(e) => setNewLeadForm({...newLeadForm, potentialValue: Number(e.target.value)})}
-                  />
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block">Usado para cálculo do total no Pipeline Kanban</span>
-                </div>
-
+              {/* Linha 4: Prioridade */}
+              <div>
                 <div>
                   <label className="text-xs font-bold text-foreground flex items-center gap-1.5 mb-1">
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -1358,6 +1347,14 @@ export default function LeadsPage() {
           </div>
         </div>
       )}
+
+      {/* Modal de Abordagem e Mensagem Personalizada direcionada ao Chat Comercial */}
+      <LeadOutreachModal
+        isOpen={!!outreachLead}
+        onClose={() => setOutreachLead(null)}
+        lead={outreachLead}
+        defaultTemplate={outreachTemplate}
+      />
     </div>
   );
 }

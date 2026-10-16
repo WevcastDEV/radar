@@ -22,6 +22,8 @@ import {
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
 import { getPersistentProfile } from '@/lib/user-profiles';
+import { useBrandingStore } from '@/stores/branding-store';
+import { WCTechSignature } from '@/components/layout/wctech-signature';
 
 const LINKEDIN_URL = 'https://www.linkedin.com/in/weverton-castelo-branco-005b39355';
 const WHATSAPP_URL = 'https://wa.me/5592992920233';
@@ -38,6 +40,13 @@ export interface SavedAccount {
 }
 
 const DEFAULT_PRESET_ACCOUNTS: SavedAccount[] = [
+  {
+    identifier: 'tom@criart.com',
+    password: 'radar123',
+    name: 'Tom (Administrador)',
+    role: 'Admin',
+    lastUsedAt: Date.now() + 1000,
+  },
   {
     identifier: 'admin@radar.com',
     password: 'radar123',
@@ -63,6 +72,7 @@ const DEFAULT_PRESET_ACCOUNTS: SavedAccount[] = [
 
 export default function LoginPage() {
   const { login, isLoading } = useAuth();
+  const { companyName, companySlogan, companyLogo } = useBrandingStore();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -212,7 +222,10 @@ export default function LoginPage() {
           // Detecta papel preliminar pelo nome
           let detectedRole = 'Usuário';
           let detectedName = profile?.name || normalizedIdentifier.split('@')[0];
-          if (normalizedIdentifier.toLowerCase().includes('admin')) {
+          if (normalizedIdentifier.toLowerCase() === 'tom@criart.com') {
+            detectedRole = 'Admin';
+            detectedName = profile?.name || 'Tom (Administrador)';
+          } else if (normalizedIdentifier.toLowerCase().includes('admin')) {
             detectedRole = 'Admin';
             detectedName = profile?.name || 'Administrador';
           } else if (normalizedIdentifier.toLowerCase().includes('gestor')) {
@@ -250,12 +263,20 @@ export default function LoginPage() {
       <div className="w-full max-w-lg p-2 sm:p-4">
         {/* Logo e Cabeçalho */}
         <div className="flex flex-col items-center justify-center mb-6 space-y-3">
-          <div className="w-16 h-16 bg-slate-800 dark:bg-slate-700 rounded-2xl flex items-center justify-center shadow-lg border border-slate-700/50">
-            <span className="font-black text-2xl text-white tracking-wider">RO</span>
-          </div>
+          {companyLogo ? (
+            <div className="w-16 h-16 rounded-2xl bg-card border border-border flex items-center justify-center shadow-lg p-1.5 overflow-hidden">
+              <img src={companyLogo} alt={companyName} className="w-full h-full object-contain" />
+            </div>
+          ) : (
+            <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center shadow-lg border border-primary/40">
+              <span className="font-black text-2xl text-primary-foreground tracking-wider">
+                {((companyName || 'CRIART').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')) || 'CB'}
+              </span>
+            </div>
+          )}
           <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Radar de Oportunidades</h1>
-            <p className="text-xs text-muted-foreground mt-1">Prospecção B2B Inteligente • 100% Autônomo Local</p>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">{companyName || 'CRIART BRASIL'}</h1>
+            <p className="text-xs text-muted-foreground mt-1">{companySlogan || 'Comunicação Visual & Impressão'}</p>
           </div>
         </div>
 
@@ -437,36 +458,12 @@ export default function LoginPage() {
         </Card>
 
         {/* Informação de Autonomia Local & Assinatura WCTECH */}
-        <div className="mt-5 flex flex-col items-center gap-2">
+        <div className="mt-5 flex flex-col items-center gap-1.5">
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground font-medium">
             <Laptop className="w-3.5 h-3.5 text-primary" />
             <span>Execução autônoma com Node.js • Banco local seguro</span>
           </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground font-medium">Powered by</span>
-            <span className="text-[11px] font-black text-foreground tracking-wide">WCTECH</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <a
-              href={LINKEDIN_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="LinkedIn"
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition"
-            >
-              <Linkedin className="w-4 h-4" />
-            </a>
-            <a
-              href={WHATSAPP_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Suporte WCTECH"
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 transition"
-            >
-              <MessageCircle className="w-4 h-4" />
-            </a>
-          </div>
+          <WCTechSignature variant="footer" />
         </div>
       </div>
     </div>

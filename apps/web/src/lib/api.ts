@@ -5,19 +5,11 @@ import { getOrCreateDeviceId } from './device-id';
 
 export function getBaseApiUrl(): string {
   if (typeof window !== 'undefined') {
-    // No navegador (Vercel ou local):
-    // Se acessado via HTTPS, sempre usa /api relativo para evitar bloqueio de Mixed Content
-    if (window.location.protocol === 'https:') {
-      return '/api';
-    }
-    // Se tiver NEXT_PUBLIC_API_URL definido explicitamente para um domínio HTTPS ou proxy
-    if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost:3001')) {
-      return process.env.NEXT_PUBLIC_API_URL;
-    }
-    // Padroniza rota unificada /api tratada pelo Next.js
+    // No navegador (seja no PC principal ou nos demais PCs conectados na rede local):
+    // Sempre utiliza a rota unificada /api tratada com proxy pelo Next.js
     return '/api';
   }
-  return process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001/api';
+  return process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001/api';
 }
 
 export const api = axios.create({
@@ -30,11 +22,9 @@ export const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    // Garante baseURL segura em runtime no navegador
+    // Garante baseURL relativa /api em runtime no navegador
     if (typeof window !== 'undefined') {
-      if (window.location.protocol === 'https:' || !process.env.NEXT_PUBLIC_API_URL) {
-        config.baseURL = '/api';
-      }
+      config.baseURL = '/api';
     }
 
     const tokens = getTokens();

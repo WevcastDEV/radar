@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { 
   MessageSquare, GitBranch,
   Volume2, Bell, TrendingUp, Trophy, Flame, 
@@ -139,9 +140,6 @@ Se vocês têm planos de modernizar a empresa, criar um sistema próprio ou auto
 🛒 Sistemas de Gestão, Estoque, Vendas e PDV
 🔧 Manutenção Especializada, Suporte Técnico e Redes
 
-🌐 Conheça nossos projetos e portfólio oficial:
-https://wctech.web.app/
-
 Qual dessas frentes mais interessa para a {{nome_cliente}} no momento para prepararmos uma proposta sem compromisso?`,
     },
     {
@@ -221,6 +219,7 @@ const triggerNativeBrowserNotification = (title: string, body: string) => {
 };
 
 export default function WhatsAppBotPage() {
+  const router = useRouter();
   const confirm = useConfirm();
   const { data: allLeads, refetch: refetchLeads } = useLeads();
   const { user } = useAuthStore();
@@ -249,8 +248,8 @@ export default function WhatsAppBotPage() {
   const [isSdrModalOpen, setIsSdrModalOpen] = useState(false);
   const [sdrConfig, setSdrConfig] = useState<any>({
     enabled: true,
-    businessName: 'WCTech',
-    businessNiche: 'Criação de Sites, Sistemas e Automação',
+    businessName: 'CRIART BRASIL',
+    businessNiche: 'Comunicação Visual e Soluções Comerciais',
     intentResponses: {
       price: '',
       interested: '',
@@ -379,7 +378,7 @@ export default function WhatsAppBotPage() {
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [replyInputText, setReplyInputText] = useState('');
   const [isSendingReply, setIsSendingReply] = useState(false);
-  const [conversationFilter, setConversationFilter] = useState<'all' | 'bot' | 'human'>('all');
+  const [conversationFilter, setConversationFilter] = useState<'all' | 'vacuum' | 'unread' | 'bot' | 'human'>('all');
   const [conversationSearch, setConversationSearch] = useState('');
 
   // Histórico de Acionados em Pastas
@@ -704,7 +703,10 @@ export default function WhatsAppBotPage() {
       // tenta conectar diretamente no daemon local da máquina do usuário (http://127.0.0.1:3001)
       if (typeof window !== 'undefined' && (!data || (!data.connected && !data.qrCode))) {
         try {
-          const directRes = await fetch('http://127.0.0.1:3001/api/whatsapp/status', {
+          const directHost = window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+            ? `http://${window.location.hostname}:3001`
+            : 'http://127.0.0.1:3001';
+          const directRes = await fetch(`${directHost}/api/whatsapp/status`, {
             headers: { 'x-device-id': deviceId || getOrCreateDeviceId() },
             signal: AbortSignal.timeout(1200),
           });
@@ -715,7 +717,7 @@ export default function WhatsAppBotPage() {
             }
           }
         } catch {
-          // Daemon local não em execução nesta porta
+          // Daemon não em execução nesta porta
         }
       }
 
@@ -774,8 +776,11 @@ export default function WhatsAppBotPage() {
       setBotStatus(prev => ({ ...prev, connected: false, qrCode: null }));
       
       const p1 = axios.post('/whatsapp/reset').catch(() => {});
+      const directHost = typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+        ? `http://${window.location.hostname}:3001`
+        : 'http://127.0.0.1:3001';
       const p2 = (typeof window !== 'undefined')
-        ? fetch('http://127.0.0.1:3001/api/whatsapp/reset', {
+        ? fetch(`${directHost}/api/whatsapp/reset`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-device-id': deviceId || getOrCreateDeviceId() },
             signal: AbortSignal.timeout(6000),
@@ -971,6 +976,11 @@ export default function WhatsAppBotPage() {
 
   const filteredConversations = useMemo(() => {
     return conversationsList.filter(conv => {
+      const isWaitingReply = conv.lastMessageSender === 'client';
+      const isUnread = (conv.unreadCount && conv.unreadCount > 0) || (conv.lastMessageSender === 'client' && conv.isRead === false);
+
+      if (conversationFilter === 'vacuum' && !isWaitingReply) return false;
+      if (conversationFilter === 'unread' && !isUnread) return false;
       if (conversationFilter === 'bot' && conv.status === 'atendimento_humano') return false;
       if (conversationFilter === 'human' && conv.status !== 'atendimento_humano') return false;
       if (conversationSearch.trim()) {
@@ -1158,8 +1168,6 @@ export default function WhatsAppBotPage() {
     setModalTemplateText(`Olá *{{nome_cliente}}*! Tudo bem? Me chamo *{{meu_nome}}* da *{{minha_empresa}}*.
 
 Entramos em contato pois notamos o destaque da sua empresa no setor de *{{segmento}}* aqui em *{{cidade}}*.
-
-🌐 Conheça mais em: https://wctech.web.app/
 
 Gostaria de saber mais sobre nossas soluções exclusivas?`);
     setIsTemplateModalOpen(true);
@@ -2268,16 +2276,7 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
             <span>🛡️ Anti-Reenvio ({attendedPhoneDigitsSet.size} protegidos)</span>
           </Button>
 
-          {/* Botão de Download do Conector Local do WhatsApp */}
-          <a
-            href="/api/whatsapp/download-conector"
-            download="radar-conector-whatsapp.zip"
-            className="h-9 px-3 text-xs font-semibold bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 rounded-md flex items-center gap-1.5 shadow-sm transition-all"
-            title="Baixar o conector leve do WhatsApp para rodar no seu PC (360 KB)"
-          >
-            <Download className="w-3.5 h-3.5 text-emerald-400" />
-            <span>📥 Baixar Conector PC (.zip)</span>
-          </a>
+          
 
           {/* Botão de regras de envio */}
           <Button
@@ -2380,58 +2379,6 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
         </div>
       </div>
 
-      {/* 🚀 BANNER FIXO E DESTACADO: Conector WhatsApp PC Local */}
-      <div className="p-4 sm:p-5 rounded-2xl border-2 border-emerald-500/50 bg-gradient-to-r from-emerald-950/40 via-emerald-900/20 to-teal-950/30 backdrop-blur-sm shadow-md flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-        <div className="flex items-start gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shrink-0 shadow-xs">
-            <Download className="w-6 h-6 animate-bounce" />
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-black text-base text-foreground">
-                📥 Conector Local do WhatsApp para PC
-              </span>
-              <Badge className="bg-emerald-600 text-white text-[10px] px-2 py-0.5 font-bold uppercase tracking-wider">
-                ⭐ Solução Definitiva
-              </Badge>
-              <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
-                Apenas 360 KB
-              </Badge>
-              {botStatus.connected ? (
-                <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 text-[10px]">
-                  ● WhatsApp Pareado
-                </Badge>
-              ) : (
-                <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/40 text-[10px]">
-                  ○ Aguardando Conexão
-                </Badge>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl">
-              Para manter o robô <strong>100% ativo 24 horas por dia sem cair a conexão nem travar o QR Code</strong> na nuvem, use o conector local no seu computador:
-            </p>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-0.5 text-[11px] text-muted-foreground">
-              <span><strong>1.</strong> Baixe o arquivo <code>radar-conector-whatsapp.zip</code></span>
-              <span>•</span>
-              <span><strong>2.</strong> Extraia em qualquer pasta</span>
-              <span>•</span>
-              <span><strong>3.</strong> Dê 2 cliques em <code className="text-emerald-400 bg-emerald-950/80 px-1 py-0.5 rounded font-mono font-bold">INICIAR_CONECTOR.bat</code></span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center gap-2.5 shrink-0 w-full lg:w-auto">
-          <a
-            href="/api/whatsapp/download-conector"
-            download="radar-conector-whatsapp.zip"
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-lg shadow-emerald-900/30 transition-all hover:scale-105 active:scale-95 cursor-pointer text-center"
-          >
-            <Download className="w-4 h-4" />
-            <span>Baixar Conector PC (.zip - 360 KB)</span>
-          </a>
-        </div>
-      </div>
-
       {/* Alerta de Desconexão / QR Code */}
       {!botStatus.connected && (
         <Card className="border-amber-500/40 bg-amber-500/10 shadow-md">
@@ -2455,32 +2402,6 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                   <span>
                     <strong>Prefere não escanear QR Code?</strong> Use o botão <strong>⚡ WhatsApp Web</strong> em qualquer lead abaixo para abrir a conversa já pronta direto no seu navegador.
                   </span>
-                </div>
-
-                {/* Bloco de Download do Conector Local do WhatsApp */}
-                <div className="mt-3 p-3.5 bg-gradient-to-r from-emerald-500/15 via-blue-500/10 to-transparent border border-emerald-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 max-w-2xl shadow-xs">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                      <Download className="w-5 h-5 text-emerald-400" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        <span>Conector WhatsApp para PC</span>
-                        <Badge className="bg-emerald-600 text-white text-[9px] px-1.5 py-0 font-bold">Leve (360 KB)</Badge>
-                      </h4>
-                      <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                        Baixe o arquivo leve para manter o WebSocket do WhatsApp rodando direto no seu PC. Dê 2 cliques e aponte a câmera!
-                      </p>
-                    </div>
-                  </div>
-
-                  <a
-                    href="/api/whatsapp/download-conector"
-                    download="radar-conector-whatsapp.zip"
-                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shrink-0 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                  >
-                    <HardDrive className="w-4 h-4" /> Baixar Conector (.zip)
-                  </a>
                 </div>
 
                 {botStatus.qrCode ? (
@@ -2599,12 +2520,23 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
             <Button
               size="sm"
               onClick={() => {
+                handleMarkHotLeadsAsRead();
+                router.push('/chat-comercial');
+              }}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 shadow-sm gap-1.5"
+            >
+              <MessageSquare className="w-3.5 h-3.5" /> Abrir no Chat Comercial
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
                 setIsHotLeadsModalOpen(true);
                 handleMarkHotLeadsAsRead();
               }}
-              className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs h-8 shadow-sm"
+              variant="outline"
+              className="border-red-500/40 text-red-400 hover:bg-red-500/10 font-bold text-xs h-8 shadow-sm"
             >
-              🔥 Ver Respostas Recebidas ({unreadHotLeadsCount})
+              🔥 Ver Lista ({unreadHotLeadsCount})
             </Button>
           </div>
         </div>
@@ -3215,12 +3147,12 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
           <CardContent className="p-3 overflow-y-auto flex-1 space-y-2">
             {queueTab === 'inbox' ? (
               <div className="space-y-2">
-                {/* Filtros da Caixa de Entrada */}
-                <div className="flex items-center gap-1.5 pb-2 border-b border-border">
+                {/* Filtros da Caixa de Entrada (Sem Rolagem Horizontal) */}
+                <div className="flex items-center flex-wrap gap-1.5 pb-2 border-b border-border overflow-hidden">
                   <button
                     type="button"
                     onClick={() => setConversationFilter('all')}
-                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all ${
+                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all whitespace-nowrap shrink-0 ${
                       conversationFilter === 'all'
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-accent/40 text-muted-foreground hover:text-foreground'
@@ -3230,8 +3162,36 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                   </button>
                   <button
                     type="button"
+                    onClick={() => setConversationFilter('vacuum')}
+                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+                      conversationFilter === 'vacuum'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-accent/40 text-muted-foreground hover:text-red-400'
+                    }`}
+                  >
+                    <span>🔴 No Vácuo</span>
+                    <span className="text-[9px] px-1 bg-red-500/40 rounded-full font-bold">
+                      {conversationsList.filter(c => c.lastMessageSender === 'client').length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConversationFilter('unread')}
+                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+                      conversationFilter === 'unread'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-accent/40 text-muted-foreground hover:text-blue-400'
+                    }`}
+                  >
+                    <span>🔵 Não Lidas</span>
+                    <span className="text-[9px] px-1 bg-blue-500/40 rounded-full font-bold">
+                      {conversationsList.filter(c => (c.unreadCount && c.unreadCount > 0) || (c.lastMessageSender === 'client' && c.isRead === false)).length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setConversationFilter('bot')}
-                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all ${
+                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all whitespace-nowrap shrink-0 ${
                       conversationFilter === 'bot'
                         ? 'bg-emerald-600 text-white'
                         : 'bg-accent/40 text-muted-foreground hover:text-foreground'
@@ -3242,7 +3202,7 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                   <button
                     type="button"
                     onClick={() => setConversationFilter('human')}
-                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all ${
+                    className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-all whitespace-nowrap shrink-0 ${
                       conversationFilter === 'human'
                         ? 'bg-amber-600 text-white'
                         : 'bg-accent/40 text-muted-foreground hover:text-foreground'
@@ -3264,6 +3224,11 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                   filteredConversations.map((conv: any) => {
                     const isSelected = selectedConversation?.id === conv.id;
                     const isHuman = conv.status === 'atendimento_humano';
+                    const isWaitingReply = conv.lastMessageSender === 'client';
+                    const isUnread = (conv.unreadCount && conv.unreadCount > 0) || (conv.lastMessageSender === 'client' && conv.isRead === false);
+                    const waitMs = Math.max(0, Date.now() - (conv.lastInteractionAt || 0));
+                    const waitMinutes = Math.floor(waitMs / 60000);
+                    const waitHours = (waitMs / 3600000).toFixed(1);
                     const rawDigits = (conv.phone || conv.id || '').replace(/\D/g, '');
                     const waUrl = `https://wa.me/${rawDigits.length === 10 || rawDigits.length === 11 ? '55' + rawDigits : rawDigits}`;
 
@@ -3274,6 +3239,10 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                         className={`p-3 rounded-xl border transition-all cursor-pointer space-y-1.5 ${
                           isSelected
                             ? 'bg-primary/10 border-primary shadow-sm'
+                            : isWaitingReply
+                            ? (waitMinutes >= 120 ? 'bg-red-950/20 border-l-4 border-l-red-500 border-red-500/30' : 'bg-amber-950/15 border-l-4 border-l-amber-500 border-amber-500/30')
+                            : isUnread
+                            ? 'bg-blue-950/10 border-l-4 border-l-blue-500 border-blue-500/30'
                             : 'bg-card/80 border-border hover:border-border/90 hover:bg-accent/30'
                         }`}
                       >
@@ -3290,6 +3259,18 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                               ) : (
                                 <Badge variant="outline" className="text-[9px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30 px-1 py-0 font-medium">
                                   🤖 Robô Ativo
+                                </Badge>
+                              )}
+                              {isWaitingReply ? (
+                                <Badge className={`text-[8px] px-1 py-0 border-0 font-bold ${
+                                  waitMinutes >= 120 ? 'bg-red-500 text-white animate-pulse' : 'bg-amber-500/20 text-amber-300'
+                                }`}>
+                                  🔴 No Vácuo ({waitMinutes >= 120 ? `${waitHours}h` : `${waitMinutes}m`})
+                                </Badge>
+                              ) : null}
+                              {isUnread && (
+                                <Badge className="text-[8px] px-1 py-0 bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold">
+                                  🔵 Não Lido
                                 </Badge>
                               )}
                             </div>
@@ -3314,8 +3295,8 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                               onClick={() => handleToggleBotForChat(conv, !isHuman)}
                               className={`h-6 px-1.5 text-[10px] font-medium rounded ${
                                 isHuman 
-                                  ? 'text-emerald-400 hover:bg-emerald-500/15' 
-                                  : 'text-amber-400 hover:bg-amber-500/15'
+                                    ? 'text-emerald-400 hover:bg-emerald-500/15' 
+                                    : 'text-amber-400 hover:bg-amber-500/15'
                               }`}
                               title={isHuman ? 'Reativar Robô para responder' : 'Pausar Robô para você conversar'}
                             >
@@ -3327,7 +3308,7 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
                         {/* Snippet da última mensagem */}
                         <div className="text-[11px] text-muted-foreground truncate bg-background/50 px-2 py-1 rounded border border-border/50">
                           <strong className="text-foreground text-[10px] mr-1">
-                            {conv.lastMessageSender === 'bot' ? '🤖 Robô:' : conv.lastMessageSender === 'human' ? '👤 Você:' : '💬 Cliente:'}
+                            {conv.lastMessageSender === 'bot' ? '🤖 Robô:' : conv.lastMessageSender === 'human' ? '👤 Você:' : '📩 Cliente:'}
                           </strong>
                           <span>{conv.lastMessageSnippet || 'Conversa iniciada'}</span>
                         </div>
@@ -3527,9 +3508,9 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
         </Card>
 
         {/* Direita: Modelos de Mensagem OU Chat ao Vivo de Conversas (7 colunas) */}
-        <div className="lg:col-span-7 space-y-6">
+        <div className="lg:col-span-7 space-y-6 h-[calc(100vh-140px)] min-h-[500px] flex flex-col">
           {queueTab === 'inbox' ? (
-            <Card className="border-border shadow-sm flex flex-col h-[750px]">
+            <Card className="border-border shadow-sm flex flex-col h-full">
               {selectedConversation ? (
                 <>
                   <CardHeader className="p-4 border-b border-border bg-accent/20 shrink-0">
@@ -5319,11 +5300,14 @@ Gostaria de saber mais sobre nossas soluções exclusivas?`);
 
                         <Button
                           size="sm"
-                          onClick={() => window.open(waUrl, '_blank')}
-                          className="h-7 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shrink-0"
+                          onClick={() => {
+                            setIsHotLeadsModalOpen(false);
+                            router.push(`/chat-comercial?phone=${rawPhone}`);
+                          }}
+                          className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold shrink-0 gap-1.5 shadow-sm"
                         >
-                          <Smartphone className="w-3 h-3 mr-1" />
-                          Abrir WhatsApp
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          Abrir no Chat
                         </Button>
                       </div>
 

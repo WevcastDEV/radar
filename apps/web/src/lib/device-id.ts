@@ -34,6 +34,11 @@ export function getDeviceName(): string {
     if (savedName && savedName.trim().length > 0) {
       return savedName.trim();
     }
+    const profile = localStorage.getItem('radar_user_profile');
+    if (profile) {
+      const parsed = JSON.parse(profile);
+      if (parsed?.name) return `${parsed.name} (Este Computador)`;
+    }
   } catch {}
 
   const deviceId = getOrCreateDeviceId();
